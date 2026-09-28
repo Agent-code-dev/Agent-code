@@ -1,0 +1,57 @@
+# ─── secrets ─────────────────────────────────────────────
+agent_config.json
+.skill-manager.json
+.env
+.env.*
+*.key
+*.pem
+*.p12
+
+# ─── runtime state ───────────────────────────────────────
+chats/
+workspace/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+skill_storage/
+
+# ─── python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ─── os ──────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── ide ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ─── misc ────────────────────────────────────────────────
+*.bak
+*.tmp
+*.orig
