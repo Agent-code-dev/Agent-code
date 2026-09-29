@@ -3,97 +3,124 @@
 A local AI agent with a headless browser, sandboxed shell, chat GUI, and a
 plug-and-play skill system backed by a hosted skill registry.
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT%20%2B%20GPL--3.0-green)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+[![PyPI](https://img.shields.io/pypi/v/agent-code)](https://pypi.org/project/agent-code/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/agent-code/)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20GPL--3.0-green)](#license)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#platform-support)
+
+**Live site:** https://agent-code.freesrv.com · **Install:** `pip install agent-code`
 
 ---
 
 ## What this is
 
-Two programs on your machine, plus a registry server that's already hosted for you.
+One command install. Two GUIs. A hosted skill registry.
 
-| File | Runs on | Job |
+| Command | What it opens |
+|---|---|
+| `agent-code` | The agent — chat GUI, headless browser, sandboxed shell |
+| `agent-code manage` | The skill store — browse, install, publish skills |
+| `agent-code skills list` | List bundled skills |
+| `agent-code skills install` | Copy bundled skills into `./skills/` |
+
+Skills are folders under `./skills/`. Drop one in, restart the agent, its tools
+appear in the LLM's tool list. No changes to the agent required.
+
+---
+
+## Install
+
+```bash
+pip install agent-code
+```
+
+That's it. No clone, no config file, no build step.
+
+Then:
+
+```bash
+agent-code              # run the agent
+agent-code manage       # open the skill store
+agent-code skills       # list bundled skills
+agent-code skills install   # copy them into ./skills/
+```
+
+### First run
+
+The agent needs an API key. On first launch:
+
+1. Click **Settings** in the top-right of the agent window
+2. Paste your API key
+3. Optionally change the base URL and model
+4. Save
+
+Or create `agent_config.json` in the folder where you run the agent:
+
+```json
+{
+  "openai_api_keys": ["sk-your-key-here"],
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_model": "gpt-4o",
+  "cloud_sync": false
+}
+```
+
+The config file wins if both exist. The Settings dialog writes to it.
+
+### Talk to it
+
+```
+go to news.ycombinator.com and list the top 5 story titles
+find a free API for cat facts and call it
+create a snake game in a single HTML file
+```
+
+---
+
+## Platform support
+
+| Platform | CLI (`skills list`, `skills install`) | GUI (`run`, `manage`) |
 |---|---|---|
-| **`agent.py`** | your machine | The agent. Chat GUI, headless browser, sandboxed shell, tool loop, skill toggles. |
-| **`skill-manager.py`** | your machine | App-store GUI. Sign in, browse, install, publish skills. |
-| **`skill-server.py`** | a server (hosted for you) | Registry + state sync. GPL-3.0. |
+| **Windows 10/11** | ✓ | ✓ (WebView2 required) |
+| **macOS 12+** | ✓ | ✓ |
+| **Ubuntu / Debian / Kali / Mint** | ✓ | needs `python3-tk` |
+| **Fedora / RHEL** | ✓ | needs `python3-tkinter` |
+| **Arch / Manjaro** | ✓ | needs `tk` |
+| **Headless server / Cloud Shell / WSL** | ✓ | ✗ (no display) |
 
-Skills are folders under `skills/`. Drop one in, restart the agent, its tools
-appear in the LLM's tool list. No changes to `agent.py` required.
+### Linux setup
 
----
+One line per distro — installs tkinter (GUI) and Chromium (browser):
 
-## About the server
+```bash
+# Ubuntu / Debian / Kali / Mint / Pop!_OS
+sudo apt install python3-tk chromium
 
-You **don't need to run the server yourself.** A live instance is already
-hosted and configured:
+# Fedora / RHEL / CentOS Stream
+sudo dnf install python3-tkinter chromium
 
-    https://skills-manager.freesrv.com
+# Arch / Manjaro
+sudo pacman -S tk chromium
+```
 
-Both `agent.py` and `skill-manager.py` point at it by default. The manager
-tries the HTTPS domain first and automatically falls back to a raw IP
-(`http://78.154.103.43:9074`) if the domain goes down.
+If `agent-code` isn't found after install, add pip's user bin to PATH:
 
-If you'd rather run your own, the source is included under GPL-3.0 (see
-[License](#license)). You can fork it, self-host it, extend the endpoints, or
-replace the storage backend. See [self-hosting the server](#self-hosting-the-server).
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-The agent **never auto-installs skills**. You do that explicitly through the manager.
+Or use the module form which never needs PATH:
 
----
+```bash
+python3 -m agent_code --version
+python3 -m agent_code run
+```
 
-## Features
+### Windows setup
 
-- **Headless Chromium** via DrissionPage — no popup window, real JS rendering
-- **Sandboxed shell** — allowlist + workspace jail, no pipes or metachars
-- **Plug-and-play skills** — each is a folder with `skill.py` + `skill.md`
-- **Skill registry** — publish, browse, install (hosted, or self-host)
-- **Stop / Continue** buttons — halt a run mid-turn, resume from last tool result
-- **Local chat save** — `chats/current.json`, auto-saved every turn
-- **Cloud sync** — optional, via the same registry (HTTPS + IP fallback)
-- **Multi-key LLM** — rotate OpenAI-compatible API keys transparently
-- **Custom base URL** — OpenAI, Together, Groq, DeepSeek, local vLLM, anything OpenAI-shaped
-- **Dark tkinter GUI** — Settings, Skills, Help dialogs, plus skill-loaded `/commands`
-- **Two-pane Help** — every skill gets its own help page, loaded from its `skill.md`
-
-Bundled default skills: `filesystem`, `public_api`, `temp_mail`.
-
----
-
-## Quick start
-
-### 1. Install dependencies
-
-    pip install DrissionPage openai
-
-Windows: install WebView2 Runtime if the browser self-test fails.
-Linux: `sudo apt install python3-tk`.
-
-### 2. Configure
-
-Create `agent_config.json`:
-
-    {
-      "openai_api_keys": ["sk-your-key-here"],
-      "openai_base_url": "https://api.openai.com/v1",
-      "openai_model": "gpt-4o",
-      "cloud_sync": false
-    }
-
-Or edit it from the GUI later via **Settings**.
-
-### 3. Run
-
-    python agent.py
-
-Or on Windows, double-click `run.bat`.
-
-### 4. Talk to it
-
-    go to news.ycombinator.com and list the top 5 story titles
-    find a free API for cat facts and call it
-    create a snake game in a single HTML file
+`pip install agent-code` handles the Python side. If `agent-code run` shows
+`browser: FAILED`, install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+from Microsoft. It's preinstalled on Windows 11 and most up-to-date Windows 10.
 
 ---
 
@@ -101,138 +128,113 @@ Or on Windows, double-click `run.bat`.
 
 A skill is a folder:
 
-    skills/my_skill/
-    ├── skill.py     ← code
-    └── skill.md     ← metadata + docs
+```
+skills/my_skill/
+├── skill.py     ← code
+└── skill.md     ← metadata + docs
+```
 
 `skill.py` exports three things:
 
-    SKILL = {"name": "my_skill", "description": "What this does."}
+```python
+SKILL = {"name": "my_skill", "description": "What this does."}
 
-    def greet(name: str = "world") -> str:
-        return f"Hello, {name}!"
+def greet(name: str = "world") -> str:
+    return f"Hello, {name}!"
 
-    TOOL_SCHEMAS = [{
-        "type": "function",
-        "function": {
-            "name": "greet",
-            "description": "Return a greeting.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-            },
+TOOL_SCHEMAS = [{
+    "type": "function",
+    "function": {
+        "name": "greet",
+        "description": "Return a greeting.",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
         },
-    }]
+    },
+}]
 
-    TOOL_CALLABLES = {"greet": greet}
+TOOL_CALLABLES = {"greet": greet}
+```
 
-That's it. Restart the agent, the LLM can call `greet()`.
+Restart the agent. The LLM can now call `greet()`.
 
 Optional `COMMANDS` export adds user-facing slash commands:
 
-    def _handle_ping(args: list, log) -> None:
-        log(f"pong {' '.join(args)}", "dim")
+```python
+def _handle_ping(args: list, log) -> None:
+    log(f"pong {' '.join(args)}", "dim")
 
-    COMMANDS = {
-        "ping": {"handler": _handle_ping, "description": "Reply pong"},
-    }
+COMMANDS = {
+    "ping": {"handler": _handle_ping, "description": "Reply pong"},
+}
+```
 
 Optional `skill.md` frontmatter gives the skill a name, version, and author.
 Anything after the closing `---` becomes the skill's help page, visible in
 the Help dialog when the user clicks the skill.
 
-Full developer guide: `docs/skills.html` — open in any browser.
+Full developer guide: [`docs/skills.html`](docs/skills.html).
+
+---
+
+## Bundled skills
+
+`pip install agent-code` ships three skills. Run `agent-code skills install`
+to copy them into your current folder's `skills/`:
+
+| Skill | What it does |
+|---|---|
+| **filesystem** | Read, write, append, list files inside the sandbox workspace |
+| **public_api** | Search 700+ free public APIs and call them |
+| **temp_mail** | Temp inbox (mail.tm / Guerrilla) + email sending (Resend / Brevo / Mailjet) |
+
+Installed skills appear under `./skills/<name>/` with `skill.py` and `skill.md`.
+Toggle them on/off in the Skills dialog.
 
 ---
 
 ## Skill registry
 
-### Use the hosted server (default)
+The registry lets you publish skills and install them anywhere.
 
-No setup needed. Both clients already point at
-`https://skills-manager.freesrv.com`. Just:
+### Use the hosted registry (default)
 
-    # Register a nickname (password is prompted)
-    python skill-manager.py register yourname
+A live instance is already running at `https://skills-manager.freesrv.com`.
+Both the manager and the agent use it by default. If the domain is down,
+they auto-fall-back to a raw IP.
 
-    # Or launch the GUI
-    python skill-manager.py
+```bash
+agent-code manage
+```
 
-The GUI lets you:
+Sign in with any nickname — the account is created automatically. Then:
 
-- Browse the store with search
+- Browse and search the store
 - Install skills into `./skills/`
 - Publish a folder as a skill
-- See your published skills and download counts
 - Delete skills you own
 
-### Self-hosting the server
+### Self-hosting the registry
 
-Only needed if you want your own instance or to modify it. The server is
-~450 lines of stdlib Python — no framework, no external dependencies.
-
-Deploy:
-
-    mkdir -p /opt/skill-server && cd /opt/skill-server
-    # copy skill-server.py here
-    python3 skill-server.py --host 0.0.0.0 --port 8000
-
-It creates `skill_server.db` (SQLite) and `skill_storage/` on first run.
-
-Put TLS in front with Caddy:
-
-    skills.example.com {
-        reverse_proxy 127.0.0.1:8000
-    }
-
-Or nginx:
-
-    server {
-        listen 443 ssl;
-        server_name skills.example.com;
-
-        location /login {
-            limit_req zone=login burst=3 nodelay;
-            proxy_pass http://127.0.0.1:8000;
-        }
-        location / {
-            proxy_pass http://127.0.0.1:8000;
-        }
-    }
-
-Point the clients at it by editing the constants at the top of both files:
-
-    SKILL_SERVER_PRIMARY  = "https://skills.example.com"
-    SKILL_SERVER_FALLBACK = "http://1.2.3.4:8000"
-
----
-
-## Architecture
-
-    [agent.py]                        [skill-manager.py]
-         │                                     │
-         │  reads token from                   │  signs in, gets token
-         │  ~/.skill-manager.json              │
-         │                                     │
-         └──────── HTTP/HTTPS ─────────────────┘
-                          │
-                          ▼
-           https://skills-manager.freesrv.com    (primary, hosted)
-           http://78.154.103.43:9074             (fallback IP)
-                          │
-                          ▼
-                  [skill-server.py]  (already deployed)
-                  - /register /login /logout
-                  - /me
-                  - /skills  GET / POST / DELETE
-                  - /skills/<name>/download
-                  - /state   GET / POST
-
-You can swap the server URL in both clients at any time.
+The server is GPL-3.0 and lives in this repo as `skill-server.py`. See
+[Server setup](#server-setup) below.
 
 ---
 
 ## Command reference
+
+### CLI
+
+| Command | What it does |
+|---|---|
+| `agent-code` | Run the agent (same as `agent-code run`) |
+| `agent-code run` | Run the agent GUI |
+| `agent-code manage` | Open the skill store GUI |
+| `agent-code skills list` | Show bundled skill names |
+| `agent-code skills install` | Copy bundled skills to `./skills/` |
+| `agent-code --version` | Print version |
+| `agent-code --help` | Show all subcommands |
 
 ### Agent (in the chat box)
 
@@ -240,7 +242,7 @@ You can swap the server URL in both clients at any time.
 |---|---|
 | `/reset` | Clear conversation memory |
 | `/history` | Print recent messages |
-| `/skills` | List loaded + disabled skills + available commands |
+| `/skills` | List loaded + disabled skills + commands |
 | `/save` | Force save chat locally and to cloud |
 | `/open <file>` | Open a file from the workspace |
 | Skill commands | Whatever skills register, e.g. `/email`, `/providers` |
@@ -257,40 +259,33 @@ You can swap the server URL in both clients at any time.
 | **Skills** | Toggle installed skills on/off |
 | **Help** | Two-pane help: sections + per-skill pages |
 
-### Skill manager
-
-| Command | What it does |
-|---|---|
-| `register <nick>` | Create an account |
-| `login <nick>` | Sign in |
-| `logout` | Sign out |
-| `whoami` | Show your account + published skills |
-| `list [--search Q]` | Browse the store |
-| `show <name>` | Full metadata for one skill |
-| `install <name> [--force]` | Download + extract to `./skills/` |
-| `uninstall <name>` | Remove from `./skills/` |
-| `installed` | List locally installed skills |
-| `publish <path> --name N --description D [--version V]` | Package and upload a folder |
-
 ---
 
 ## Configuration reference
 
 ### `agent_config.json`
 
-    {
-      "openai_api_keys": ["sk-...", "sk-..."],
-      "openai_base_url": "https://api.openai.com/v1",
-      "openai_model": "gpt-4o",
-      "cloud_sync": false,
-      "disabled_skills": [],
-      "email_api": {
-        "provider": "resend",
-        "api_key": "re_...",
-        "from_addr": "onboarding@resend.dev",
-        "from_name": "Agent"
-      }
-    }
+Placed in the folder where you run `agent-code`, or in the platform config dir
+if no local file exists:
+
+- **Windows:** `%APPDATA%\agent-code\agent_config.json`
+- **Linux/macOS:** `~/.config/agent-code/agent_config.json`
+
+```json
+{
+  "openai_api_keys": ["sk-...", "sk-..."],
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_model": "gpt-4o",
+  "cloud_sync": false,
+  "disabled_skills": [],
+  "email_api": {
+    "provider": "resend",
+    "api_key": "re_...",
+    "from_addr": "onboarding@resend.dev",
+    "from_name": "Agent"
+  }
+}
+```
 
 | Field | Notes |
 |---|---|
@@ -301,10 +296,36 @@ You can swap the server URL in both clients at any time.
 | `disabled_skills` | List of skill folder names to skip |
 | `email_api` | Optional, used by the `temp_mail` skill |
 
-### `~/.skill-manager.json`
+### Where files go
 
-Managed automatically by `skill-manager.py`. Contains the auth token and
-cached skill list. Never commit this.
+When you run `agent-code` from a folder, it creates:
+
+```
+<your-folder>/
+├── skills/          ← installed + bundled skills
+├── workspace/       ← sandbox for shell and file tools
+├── chats/           ← auto-saved conversation
+└── agent_config.json (if you created one here)
+```
+
+Whichever folder you launch from is the "project" for that session. Run
+`agent-code` from different folders to keep separate projects.
+
+---
+
+## Server setup
+
+Only needed if you want your own registry instance. The client works with
+the hosted one out of the box.
+
+```bash
+mkdir -p /opt/skill-server && cd /opt/skill-server
+# copy skill-server.py here
+python3 skill-server.py --host 0.0.0.0 --port 8000
+```
+
+Then point the clients at it by editing `SKILL_SERVER_PRIMARY` and
+`SKILL_SERVER_FALLBACK` in the source, or by setting them in `agent_config.json`.
 
 ---
 
@@ -319,49 +340,66 @@ you need to be careful.
   pipes / redirects / `;` / `&` / `&&`, no absolute paths outside the workspace
 - **Filesystem skill** — every path resolved and validated against `workspace/`
 - **Browser** — headless, in a throwaway profile
-- **Server** — PBKDF2 password hashing, session tokens, ownership checks on
-  publish/delete, ZIP entry validation, upload size cap
+- **Registry server** — PBKDF2 password hashing, session tokens, ownership
+  checks on publish/delete, ZIP entry validation, upload size cap
 
 **Not sandboxed:**
 
 - **`python` is in the shell allowlist** — the agent can read arbitrary
-  files. If that matters, remove `python`, `python3`, `node` from `ALLOWED_CMDS`.
+  files. Remove `python`, `python3`, `node` from `ALLOWED_CMDS` if that matters.
 - **`curl` / `wget` are allowed** — the agent can POST local data to remote
-  servers. Remove them if that's a concern.
+  servers.
 - **Skills are arbitrary Python** — installing a skill is trusting its author.
-- **Prompt injection via web content** — a malicious page can steer the
-  agent. Mitigated by the sandbox, not eliminated.
+- **Prompt injection via web content** — a malicious page can steer the agent.
 
-For untrusted use, run the whole thing in Docker.
+For untrusted use, run the agent inside Docker.
 
 ---
 
 ## Files at a glance
 
-    man-code/
-    ├── agent.py                 ← the agent
-    ├── skill-manager.py         ← the client
-    ├── agent_config.json        ← your keys (gitignored)
-    ├── agent_config.example.json
-    ├── run.bat                  ← Windows launcher for the agent
-    ├── store.bat                ← Windows launcher for the manager
-    ├── README.md
-    ├── LICENSE                  ← MIT (client code)
-    ├── LICENSE-GPL              ← GPL-3.0 (server code)
-    ├── .gitignore
-    ├── docs/
-    │   └── skills.html          ← developer guide for writing skills
-    ├── chats/
-    │   └── current.json         ← auto-saved conversation (gitignored)
-    ├── skills/
-    │   ├── loader.py            ← loads every enabled skill
-    │   ├── filesystem/
-    │   ├── public_api/
-    │   └── temp_mail/
-    └── workspace/               ← agent's sandbox (gitignored)
+### Installed package
 
-`skill-server.py` is **not** in this tree. It lives on the server and is
-maintained separately.
+```
+site-packages/agent_code/
+├── __init__.py
+├── __main__.py
+├── cli.py
+├── paths.py
+├── agent.py
+├── skill_manager.py
+├── loader.py
+└── data/
+    └── skills/
+        ├── filesystem/{skill.py,skill.md}
+        ├── public_api/{skill.py,skill.md}
+        └── temp_mail/{skill.py,skill.md}
+```
+
+### Your project folder (created on first run)
+
+```
+your-folder/
+├── skills/
+├── workspace/
+├── chats/
+└── agent_config.json (optional)
+```
+
+### This repository
+
+```
+Agent-code/
+├── pyproject.toml          ← PyPI metadata
+├── src/agent_code/         ← the package source
+├── docs/skills.html        ← developer guide
+├── README.md
+├── LICENSE                 ← MIT
+├── LICENSE-GPL             ← GPL-3.0
+└── .gitignore
+```
+
+`skill-server.py` (the registry backend, GPL-3.0) is deployed separately on a VPS.
 
 ---
 
@@ -369,25 +407,51 @@ maintained separately.
 
 | Symptom | Fix |
 |---|---|
-| `browser: FAILED` | Install WebView2 (Windows) or check Chromium. |
-| `LLM ERROR: 401` | Wrong API key, or quotes around the value. |
-| `LLM ERROR: 404` | Model name doesn't match the provider. |
-| `BLOCKED: '<cmd>' not allowed` | Add the command to `ALLOWED_CMDS` in `agent.py`. |
-| `NOT_FOUND: <selector>` | CSS selector didn't match. Run `browser_snapshot`. |
-| `[loader] FAILED to load skill` | Run `python skills/<name>/skill.py` to see the error. |
-| Registry times out | Fallback IP should kick in; check console for `[fallback]`. |
-| `Cloudflare blocked` | Add a WAF skip rule for the API paths on your server. |
+| `agent-code: command not found` | Add `~/.local/bin` to PATH, or use `python3 -m agent_code` |
+| `browser: FAILED` (Windows) | Install WebView2 Runtime from Microsoft |
+| `browser: FAILED` (Linux) | `sudo apt install chromium` (or `dnf` / `pacman` equivalent) |
+| `_tkinter.TclError` | Install `python3-tk` (Debian-family) or `python3-tkinter` (Fedora) |
+| `no display name and no $DISPLAY` | You're on a headless machine — GUI won't work there |
+| `LLM ERROR: 401` | Wrong API key, or stray quotes around it in `agent_config.json` |
+| `LLM ERROR: 404` | Model name doesn't match the provider |
+| `BLOCKED: '<cmd>' not allowed` | Add it to `ALLOWED_CMDS`, or use a different approach |
+| `[loader] FAILED to load skill` | Run `python skills/<name>/skill.py` to see the import error |
+| `externally-managed-environment` (Linux) | Use `pipx install agent-code` or a virtualenv |
+
+---
+
+## Development
+
+Clone the repo, install in editable mode:
+
+```bash
+git clone https://github.com/minecraftbefile-maker/Agent-code.git
+cd Agent-code
+pip install -e .
+```
+
+Run the agent, manager, and site server directly:
+
+```bash
+agent-code run
+agent-code manage
+python -m agent_code.landing --port 8080     # if you kept the site server
+```
+
+The skill loader is ~200 lines: `src/agent_code/loader.py`. Read it alongside
+`docs/skills.html` — between the two you'll know everything the agent does
+with a skill.
 
 ---
 
 ## License
 
-This project uses a split license:
+Split license:
 
 | Component | License |
 |---|---|
-| `agent.py`, `skill-manager.py`, `skills/**`, `docs/**`, `*.bat` | **MIT** — see `LICENSE` |
-| `skill-server.py` | **GPL-3.0** — see `LICENSE-GPL` |
+| `agent_code/` package, `docs/**`, README | **MIT** — see [`LICENSE`](LICENSE) |
+| `skill-server.py` | **GPL-3.0** — see [`LICENSE-GPL`](LICENSE-GPL) |
 
 **Why the split?** The client code is meant to be embedded, forked, and
 redistributed freely. The server is meant to stay open — if you host a
