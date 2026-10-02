@@ -2,8 +2,12 @@
 name: public_api
 description: Search free public APIs and call them.
 version: 1.0.0
-author: abdo
+author: admin
 ---
+
+# public_api
+
+Search free public APIs and call them.
 
 # public_api
 

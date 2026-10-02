@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-skill-manager.py — GUI skill store (tkinter) with server fallback.
+skill-manager.py — GUI skill store (tkinter) with server fallback and AI warnings.
 
 Server fallback: HTTPS domain primary, raw IP on failure.
-
-Config (~/.skill-manager.json):
-    token, nickname, user_id, last_login, my_skills, cached_at
-
-Skill folders must contain skill.py + skill.md.
+Config (~/.skill-manager.json): token, nickname, user_id, my_skills, cached_at
 """
 
 import os
@@ -33,8 +29,7 @@ import tkinter as tk
 
 CONFIG_FILE = Path.home() / ".skill-manager.json"
 
-# Server chain: primary HTTPS, IP fallback.
-SKILL_SERVER_PRIMARY  = "https://skills-manager.freesrv.com"
+SKILL_SERVER_PRIMARY = "https://skills-manager.freesrv.com"
 SKILL_SERVER_FALLBACK = "http://78.154.103.43:9074"
 SKILL_SERVERS = [SKILL_SERVER_PRIMARY, SKILL_SERVER_FALLBACK]
 DEFAULT_SERVER = SKILL_SERVER_PRIMARY
@@ -51,7 +46,6 @@ DEFAULT_CONFIG = {
     "cached_at": None,
 }
 
-# A browser-like UA to avoid Cloudflare's bot detection (error 1010)
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
               "AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/125.0.0.0 Safari/537.36")
@@ -127,32 +121,32 @@ def read_skill_md(folder: Path) -> dict:
 def write_skill_md(folder: Path, name: str, description: str,
                    version: str = "1.0.0", author: str = "", body: str = ""):
     md_path = folder / "skill.md"
-    text = (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"version: {version}\n"
-        f"author: {author}\n"
-        "---\n\n"
-        f"# {name}\n\n"
-        f"{description}\n"
-    )
+    text = ("---\n"
+            f"name: {name}\n"
+            f"description: {description}\n"
+            f"version: {version}\n"
+            f"author: {author}\n"
+            "---\n\n"
+            f"# {name}\n\n"
+            f"{description}\n")
     if body:
         text += "\n" + body.strip() + "\n"
     md_path.write_text(text, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
-# HTTP client with server fallback
+# HTTP with server fallback
 # ---------------------------------------------------------------------------
 
 class ApiError(Exception):
     pass
 
 
-def _do_request(server: str, method: str, path: str, cfg: dict,
-                body: dict | None, auth: bool) -> dict:
-    """Single server request. Raises on any failure."""
+class _FallbackNeeded(Exception):
+    pass
+
+
+def _do_request(server, method, path, cfg, body, auth):
     url = server.rstrip("/") + path
     data = None
     headers = {
@@ -160,7 +154,6 @@ def _do_request(server: str, method: str, path: str, cfg: dict,
         "User-Agent": USER_AGENT,
         "Accept-Language": "en-US,en;q=0.9",
     }
-
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -183,23 +176,20 @@ def _do_request(server: str, method: str, path: str, cfg: dict,
 
         lower = payload.lower()
         if any(m in lower for m in CF_MARKERS):
-            # Signal fallback: CF blocked
             raise _FallbackNeeded(f"Cloudflare block (HTTP {e.code})")
 
         try:
             err = json.loads(payload)
+            if e.code == 202:
+                return err
             msg = err.get("error", payload)
         except Exception:
             msg = payload or f"HTTP {e.code}"
 
-        # Real server responses — do NOT fallback
         if e.code == 401:
             raise ApiError(f"AUTH_EXPIRED: {msg}")
         if e.code == 403:
-            raise ApiError(
-                f"Not allowed: {msg}\n\n"
-                f"If this concerns a skill, it was published by a different "
-                f"account. Sign in as that account to modify it.")
+            raise ApiError(f"Not allowed: {msg}")
         if e.code == 404:
             raise ApiError(f"not found: {msg}")
         if e.code == 400:
@@ -207,19 +197,11 @@ def _do_request(server: str, method: str, path: str, cfg: dict,
         if e.code >= 500:
             raise ApiError(f"server error ({e.code}): {msg}")
         raise ApiError(msg)
-
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         raise _FallbackNeeded(str(e))
 
 
-class _FallbackNeeded(Exception):
-    """Internal — signals that another server should be tried."""
-    pass
-
-
-def api(method: str, path: str, cfg: dict, body: dict | None = None,
-        auth: bool = False) -> dict:
-    """Try each server in order until one returns a valid response."""
+def api(method, path, cfg, body=None, auth=False):
     errors = []
     for server in SKILL_SERVERS:
         try:
@@ -230,8 +212,6 @@ def api(method: str, path: str, cfg: dict, body: dict | None = None,
         except _FallbackNeeded as e:
             errors.append(f"{server}: {e}")
             continue
-        # ApiError propagates directly — no fallback
-
     raise ApiError("all servers failed:\n  " + "\n  ".join(errors))
 
 
@@ -264,6 +244,26 @@ def fmt_time(ts):
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
     except Exception:
         return str(ts)
+
+
+def _verdict_of(skill_meta):
+    """Safely extract the AI verdict from a skill dict."""
+    if not isinstance(skill_meta, dict):
+        return "safe"
+    v = skill_meta.get("ai_verdict") or "safe"
+    return str(v).lower()
+
+
+def _reasons_of(skill_meta):
+    if not isinstance(skill_meta, dict):
+        return []
+    r = skill_meta.get("ai_reasons") or []
+    if isinstance(r, str):
+        try:
+            r = json.loads(r)
+        except Exception:
+            r = []
+    return r if isinstance(r, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -532,16 +532,13 @@ class PublishDialog(tk.Toplevel):
         folder = self._loaded_folder
         if not folder or not folder.is_dir():
             return
-
         has_py = (folder / "skill.py").exists()
         has_md = (folder / "skill.md").exists()
-
         if not has_py:
             self.banner.configure(
                 text="⚠ folder has no skill.py — publishing will fail",
                 foreground=RED)
             return
-
         if not has_md:
             self.banner.configure(
                 text="⚠ folder has no skill.md — will be created on publish",
@@ -549,7 +546,6 @@ class PublishDialog(tk.Toplevel):
             if not self.name_entry.get():
                 self.name_entry.insert(0, folder.name)
             return
-
         meta = read_skill_md(folder)
         if not meta:
             self.banner.configure(
@@ -560,17 +556,14 @@ class PublishDialog(tk.Toplevel):
                 text=f"✓ loaded from skill.md — author: "
                      f"{meta.get('author', 'unknown')}",
                 foreground=GREEN)
-
         if meta.get("name"):
             self.name_entry.delete(0, "end")
             self.name_entry.insert(0, meta["name"])
         elif not self.name_entry.get():
             self.name_entry.insert(0, folder.name)
-
         if meta.get("description") and not self.desc_entry.get():
             self.desc_entry.delete(0, "end")
             self.desc_entry.insert(0, meta["description"])
-
         if meta.get("version"):
             self.ver_entry.delete(0, "end")
             self.ver_entry.insert(0, meta["version"])
@@ -587,10 +580,8 @@ class PublishDialog(tk.Toplevel):
         path = Path(path_str)
 
         if not (path / "skill.py").exists():
-            messagebox.showerror(
-                "Publish",
-                "Folder must contain skill.py.",
-                parent=self)
+            messagebox.showerror("Publish", "Folder must contain skill.py",
+                                 parent=self)
             return
         if not name or not desc:
             messagebox.showerror("Publish", "Name and description required",
@@ -633,7 +624,7 @@ class PublishDialog(tk.Toplevel):
                     raise ApiError(f"skill too large ({len(blob)} bytes, max 5 MB)")
 
                 self.after(0, lambda: self.status.configure(
-                    text=f"uploading {len(blob):,} bytes…"))
+                    text=f"uploading {len(blob):,} bytes… AI is reviewing…"))
 
                 r = api("POST", "/skills", self.cfg, auth=True, body={
                     "name": name,
@@ -641,8 +632,27 @@ class PublishDialog(tk.Toplevel):
                     "version": ver,
                     "zip_b64": base64.b64encode(blob).decode("ascii"),
                 })
-                self.result = r
+
+                self.result = r or {}
                 self.after(0, self.destroy)
+
+                status = (r or {}).get("status", "")
+                if status == "queued_for_review":
+                    reasons = "\n".join(
+                        f"  • {x}" for x in ((r or {}).get("ai_reasons") or [])[:5])
+                    verdict = ((r or {}).get("ai_verdict") or "suspicious").upper()
+                    summary = ((r or {}).get("ai_summary") or "").strip()
+                    self.after(0, lambda v=verdict, s=summary, rs=reasons, n=name:
+                               messagebox.showwarning(
+                                   "Queued for review",
+                                   f"AI flagged '{n}' as {v}.\n\n"
+                                   f"{s}\n\n{rs}\n\n"
+                                   "It has been queued for admin review. "
+                                   "It will appear in the store once approved."))
+                elif status == "published":
+                    self.after(0, lambda n=name: messagebox.showinfo(
+                        "Published",
+                        f"'{n}' passed AI review and is now live."))
             except ApiError as ex:
                 err_msg = str(ex)
                 self.after(0, lambda m=err_msg: messagebox.showerror(
@@ -668,20 +678,26 @@ class SkillStore(tk.Tk):
         self.cfg = load_config()
 
         self.title("Skill Store")
-        self.geometry("1120x720")
-        self.minsize(960, 580)
+        self.geometry("1160x740")
+        self.minsize(1000, 600)
         apply_theme(self)
 
+        # ---- state flags (must be initialized before _build_ui / refresh) ----
         self.installed_only = False
         self.mine_only = False
+        self.flagged_only = False
         self.selected_skill = None
+        self.selected_skill_meta = None
         self._my_skill_names = {s.get("name") for s in self.cfg.get("my_skills", [])}
 
         self._build_ui()
         self._restore_session()
         self.after(200, self.refresh_skills)
 
+    # ---- UI ----
+
     def _build_ui(self):
+        # Header
         header = tk.Frame(self, bg=BG_PANEL)
         header.pack(fill="x", side="top")
 
@@ -700,6 +716,7 @@ class SkillStore(tk.Tk):
                                     command=self._on_login_click)
         self.login_btn.pack(side="right")
 
+        # Toolbar
         toolbar = tk.Frame(self, bg=BG)
         toolbar.pack(fill="x", padx=16, pady=(12, 6))
 
@@ -711,35 +728,44 @@ class SkillStore(tk.Tk):
         self.search_entry.bind("<Return>", lambda ev: self.refresh_skills())
 
         ttk.Button(toolbar, text="Search", command=self.refresh_skills).pack(side="left")
-        ttk.Button(toolbar, text="Refresh", command=self.refresh_skills).pack(side="left", padx=(6, 0))
+        ttk.Button(toolbar, text="Refresh", command=self.refresh_skills).pack(
+            side="left", padx=(6, 0))
         self.publish_btn = ttk.Button(toolbar, text="Publish…",
                                       command=self._on_publish_click)
         self.publish_btn.pack(side="left", padx=(6, 0))
 
-        self.mine_btn = ttk.Button(toolbar, text="Mine only", style="Toggle.TButton",
+        self.mine_btn = ttk.Button(toolbar, text="Mine only",
+                                   style="Toggle.TButton",
                                    command=self._toggle_mine)
         self.mine_btn.pack(side="right", padx=(6, 0))
         self.installed_btn = ttk.Button(toolbar, text="Installed only",
                                         style="Toggle.TButton",
                                         command=self._toggle_installed)
         self.installed_btn.pack(side="right")
+        self.flagged_btn = ttk.Button(toolbar, text="Flagged only",
+                                      style="Toggle.TButton",
+                                      command=self._toggle_flagged)
+        self.flagged_btn.pack(side="right", padx=(6, 0))
 
+        # Split
         split = tk.Frame(self, bg=BG)
         split.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
+        # Tree list
         left_frame = tk.Frame(split, bg=BG_PANEL,
                               highlightbackground=BORDER, highlightthickness=1)
         left_frame.pack(side="left", fill="both", expand=True)
 
-        cols = ("name", "version", "author", "downloads", "mine", "installed")
+        cols = ("!", "name", "version", "author", "downloads", "mine", "installed")
         self.tree = ttk.Treeview(left_frame, columns=cols, show="headings",
                                  selectmode="browse")
         for c, t, w, a in [
+            ("!", "!", 26, "center"),
             ("name", "Name", 200, "w"),
-            ("version", "Version", 80, "center"),
-            ("author", "Author", 120, "w"),
-            ("downloads", "DLs", 60, "e"),
-            ("mine", "Yours", 60, "center"),
+            ("version", "Version", 78, "center"),
+            ("author", "Author", 110, "w"),
+            ("downloads", "DLs", 55, "e"),
+            ("mine", "Yours", 55, "center"),
             ("installed", "Installed", 80, "center"),
         ]:
             self.tree.heading(c, text=t)
@@ -757,24 +783,30 @@ class SkillStore(tk.Tk):
                   background=[("selected", ACCENT)],
                   foreground=[("selected", "#ffffff")])
 
+        self.tree.tag_configure("suspicious", foreground=YELLOW)
+        self.tree.tag_configure("malicious", foreground=RED)
+        self.tree.tag_configure("reported", foreground=YELLOW)
+
         vsb = ttk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        right_frame = tk.Frame(split, bg=BG_CARD, width=360,
+        # Detail panel
+        right_frame = tk.Frame(split, bg=BG_CARD, width=380,
                                highlightbackground=BORDER, highlightthickness=1)
         right_frame.pack(side="right", fill="y", padx=(12, 0))
         right_frame.pack_propagate(False)
 
         detail = tk.Frame(right_frame, bg=BG_CARD)
         detail.pack(fill="both", expand=True, padx=18, pady=18)
+        self._detail_frame = detail
 
         self.d_name = tk.Label(detail, text="Select a skill",
                                bg=BG_CARD, fg=FG,
                                font=("Segoe UI", 14, "bold"),
-                               anchor="w", justify="left", wraplength=320)
+                               anchor="w", justify="left", wraplength=340)
         self.d_name.pack(fill="x")
 
         self.d_meta = tk.Label(detail, text="", bg=BG_CARD, fg=FG_DIM,
@@ -783,8 +815,13 @@ class SkillStore(tk.Tk):
 
         self.d_desc = tk.Label(detail, text="", bg=BG_CARD, fg=FG,
                                font=("Segoe UI", 10), anchor="nw",
-                               justify="left", wraplength=320)
+                               justify="left", wraplength=340)
         self.d_desc.pack(fill="x", pady=(0, 12))
+
+        # warning banner (packed on demand in _show_detail)
+        self.d_warn = tk.Label(detail, text="", bg=BG_CARD, fg=YELLOW,
+                               font=("Segoe UI", 9),
+                               anchor="w", justify="left", wraplength=340)
 
         self.d_status = tk.Label(detail, text="", bg=BG_CARD, fg=GREEN,
                                  font=("Segoe UI", 9, "bold"), anchor="w")
@@ -800,10 +837,14 @@ class SkillStore(tk.Tk):
                                           command=self._on_uninstall_click)
         self.d_uninstall_btn.pack(fill="x", pady=(0, 6))
 
+        self.d_report_btn = ttk.Button(detail, text="Report…",
+                                       command=self._on_report_click)
+
         self.d_delete_btn = ttk.Button(detail, text="Delete from server",
                                        style="Danger.TButton",
                                        command=self._on_delete_click)
 
+        # Status bar
         status_bar = tk.Frame(self, bg=BG_PANEL)
         status_bar.pack(fill="x", side="bottom")
         self.status_lbl = ttk.Label(status_bar, text="Ready.",
@@ -823,7 +864,6 @@ class SkillStore(tk.Tk):
             self.login_btn.configure(text="Sign out",
                                      command=self._on_logout_click)
             self.publish_btn.configure(state="normal")
-
             cached = self.cfg.get("my_skills", [])
             if cached:
                 self.cache_lbl.configure(
@@ -841,18 +881,18 @@ class SkillStore(tk.Tk):
         def work():
             try:
                 r = api("GET", "/me", self.cfg, auth=True)
-                user = r["user"]
-                skills = r.get("skills", [])
-                self.cfg["user_id"] = user["id"]
-                self.cfg["nickname"] = user["nickname"]
+                user = r.get("user") or {}
+                skills = r.get("skills") or []
+                self.cfg["user_id"] = user.get("id")
+                self.cfg["nickname"] = user.get("nickname")
                 self.cfg["my_skills"] = skills
                 self.cfg["cached_at"] = time.time()
                 save_config(self.cfg)
-                self._my_skill_names = {s["name"] for s in skills}
+                self._my_skill_names = {s.get("name") for s in skills if s.get("name")}
 
                 def ui_update():
                     self.user_lbl.configure(
-                        text=f"● {user['nickname']}  (id {user['id']})")
+                        text=f"● {user.get('nickname','?')}  (id {user.get('id','?')})")
                     self.cache_lbl.configure(
                         text=f"cached: {len(skills)} published · "
                              f"last sync {fmt_time(self.cfg['cached_at'])}")
@@ -931,10 +971,17 @@ class SkillStore(tk.Tk):
                 if q:
                     path += f"?search={urllib.parse.quote(q)}"
                 r = api("GET", path, self.cfg)
-                skills = r.get("skills", [])
+                skills = r.get("skills") if isinstance(r, dict) else []
+                if not isinstance(skills, list):
+                    skills = []
                 self.after(0, lambda s=skills: self._populate(s))
             except ApiError as ex:
                 msg = str(ex)
+                self.after(0, lambda m=msg: self.set_status(f"error: {m}"))
+            except Exception as ex:
+                import traceback
+                traceback.print_exc()
+                msg = f"{type(ex).__name__}: {ex}"
                 self.after(0, lambda m=msg: self.set_status(f"error: {m}"))
 
         threading.Thread(target=work, daemon=True).start()
@@ -943,20 +990,46 @@ class SkillStore(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         shown = 0
         for s in skills:
-            installed = is_installed(s["name"])
-            is_mine = s["name"] in self._my_skill_names
+            if not isinstance(s, dict):
+                continue
+            name = s.get("name") or "?"
+            installed = is_installed(name)
+            is_mine = name in self._my_skill_names
+
             if self.installed_only and not installed:
                 continue
             if self.mine_only and not is_mine:
                 continue
-            self.tree.insert("", "end", iid=s["name"], values=(
-                s["name"],
+
+            verdict = _verdict_of(s)
+            report_count = int(s.get("report_count") or 0)
+            flagged = bool(s.get("flagged")) or verdict != "safe" or report_count > 0
+
+            if self.flagged_only and not flagged:
+                continue
+
+            if verdict == "malicious":
+                warn = "☠"
+                tag = "malicious"
+            elif verdict == "suspicious":
+                warn = "⚠"
+                tag = "suspicious"
+            elif report_count > 0:
+                warn = "⚠"
+                tag = "reported"
+            else:
+                warn = ""
+                tag = ""
+
+            self.tree.insert("", "end", iid=name, values=(
+                warn,
+                name,
                 s.get("version", "?"),
                 s.get("author", "?"),
                 s.get("downloads", 0),
                 "★" if is_mine else "",
                 "✓" if installed else "",
-            ))
+            ), tags=(tag,) if tag else ())
             shown += 1
         self.count_lbl.configure(text=f"{shown} skill(s)")
         self.set_status("loaded.")
@@ -971,6 +1044,12 @@ class SkillStore(tk.Tk):
         self.mine_only = not self.mine_only
         self.mine_btn.configure(
             style="ToggleOn.TButton" if self.mine_only else "Toggle.TButton")
+        self.refresh_skills()
+
+    def _toggle_flagged(self):
+        self.flagged_only = not getattr(self, "flagged_only", False)
+        self.flagged_btn.configure(
+            style="ToggleOn.TButton" if self.flagged_only else "Toggle.TButton")
         self.refresh_skills()
 
     def _on_select(self, event):
@@ -989,42 +1068,117 @@ class SkillStore(tk.Tk):
         self.d_install_btn.configure(state="disabled")
         self.d_uninstall_btn.configure(state="disabled")
         self.d_delete_btn.pack_forget()
+        self.d_report_btn.pack_forget()
+        self.d_warn.pack_forget()
 
         def work():
             try:
                 r = api("GET", f"/skills/{name}", self.cfg)
-                self.after(0, lambda s=r["skill"]: self._show_detail(s))
+                skill = r.get("skill") if isinstance(r, dict) else None
+                if not isinstance(skill, dict):
+                    raise ApiError("invalid response from server")
+                self.after(0, lambda s=skill: self._show_detail(s))
             except ApiError as ex:
                 msg = str(ex)
+                self.after(0, lambda m=msg: self.d_meta.configure(text=f"error: {m}"))
+            except Exception as ex:
+                msg = f"{type(ex).__name__}: {ex}"
                 self.after(0, lambda m=msg: self.d_meta.configure(text=f"error: {m}"))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _show_detail(self, s):
-        name = s["name"]
+        self.selected_skill_meta = s
+        name = s.get("name", "?")
         is_mine = name in self._my_skill_names
         installed = is_installed(name)
 
         self.d_name.configure(text=name)
-        parts = [f"v{s['version']}", s['author'], f"{s['downloads']} downloads"]
+        parts = [
+            f"v{s.get('version','?')}",
+            s.get("author", "?"),
+            f"{s.get('downloads',0)} downloads",
+        ]
         if is_mine:
             parts.append("★ yours")
         self.d_meta.configure(text="  ·  ".join(parts))
-        self.d_desc.configure(text=s["description"])
+        self.d_desc.configure(text=s.get("description", ""))
 
+        # ---- warning banner ----
+        verdict = _verdict_of(s)
+        reasons = _reasons_of(s)
+        reports = s.get("reports") or []
+        if not isinstance(reports, list):
+            reports = []
+        report_count = int(s.get("report_count") or len(reports))
+
+        lines = []
+        color = FG_DIM
+        title = ""
+
+        if verdict == "malicious":
+            title = "☠ SYSTEM FLAGGED: MALICIOUS"
+            color = RED
+        elif verdict == "suspicious":
+            title = "⚠ SYSTEM FLAGGED: SUSPICIOUS"
+            color = YELLOW
+
+        if report_count > 0:
+            if title:
+                title += f"  ·  {report_count} user report(s)"
+            else:
+                title = f"⚠ {report_count} user report(s)"
+                color = YELLOW
+
+        if title:
+            lines.append(title)
+            summary = (s.get("ai_summary") or "").strip()
+            if summary:
+                lines.append(f"   {summary}")
+            for r in reasons[:5]:
+                lines.append(f"   • {r}")
+            for r in reports[:3]:
+                if not isinstance(r, dict):
+                    continue
+                detail = (r.get("reason") or "").strip()
+                if r.get("details"):
+                    detail += f" — {str(r['details'])[:80]}"
+                lines.append(f"   • user report: {detail}")
+
+        if lines:
+            self.d_warn.configure(text="\n".join(lines), fg=color)
+            try:
+                self.d_warn.pack(fill="x", pady=(0, 12), before=self.d_status)
+            except tk.TclError:
+                self.d_warn.pack(fill="x", pady=(0, 12))
+        else:
+            self.d_warn.pack_forget()
+
+        # ---- status + buttons ----
         if installed:
             self.d_status.configure(text="✓ installed", fg=GREEN)
-            self.d_install_btn.configure(text="Reinstall", state="normal")
+            self.d_install_btn.configure(state="normal")
             self.d_uninstall_btn.configure(state="normal")
         else:
             self.d_status.configure(text="not installed", fg=FG_DIM)
-            self.d_install_btn.configure(text="Install", state="normal")
+            self.d_install_btn.configure(state="normal")
             self.d_uninstall_btn.configure(state="disabled")
+
+        # label install button based on verdict
+        if verdict in ("malicious", "suspicious") or report_count > 0:
+            self.d_install_btn.configure(text="Install anyway…")
+        else:
+            self.d_install_btn.configure(text="Reinstall" if installed else "Install")
+
+        # report button always available
+        self.d_report_btn.pack(fill="x", pady=(0, 6))
 
         if is_mine:
             self.d_delete_btn.pack(fill="x", pady=(6, 0))
+        else:
+            self.d_delete_btn.pack_forget()
 
-    # ---- install / uninstall / delete ----
+    # ---- install / uninstall / report / delete ----
 
     def _on_install_click(self):
         if not self.selected_skill:
@@ -1033,7 +1187,34 @@ class SkillStore(tk.Tk):
             messagebox.showinfo("Install", "Sign in first.", parent=self)
             return
 
+        s = self.selected_skill_meta or {}
+        verdict = _verdict_of(s)
+        report_count = int(s.get("report_count") or len(s.get("reports") or []))
         name = self.selected_skill
+
+        if verdict == "malicious":
+            reasons = "\n".join(f"  • {r}" for r in _reasons_of(s)[:4])
+            if not messagebox.askyesno(
+                    "⚠ MALICIOUS skill",
+                    f"AI flagged '{name}' as MALICIOUS.\n\n"
+                    f"{(s.get('ai_summary') or '').strip()}\n\n"
+                    f"{reasons}\n\n"
+                    "Installing this is dangerous. Continue anyway?",
+                    icon="error", parent=self):
+                return
+        elif verdict == "suspicious" or report_count > 0:
+            reasons = "\n".join(f"  • {r}" for r in _reasons_of(s)[:4])
+            if not messagebox.askyesno(
+                    "⚠ Flagged skill",
+                    f"'{name}' was flagged by the system.\n\n"
+                    f"AI verdict: {verdict.upper()}\n"
+                    f"{(s.get('ai_summary') or '').strip()}\n"
+                    f"{reasons}\n"
+                    f"User reports: {report_count}\n\n"
+                    "Install anyway?",
+                    icon="warning", parent=self):
+                return
+
         self.d_install_btn.configure(state="disabled")
         self.set_status(f"installing {name}…")
 
@@ -1085,6 +1266,76 @@ class SkillStore(tk.Tk):
             msg = f"{type(ex).__name__}: {ex}"
             messagebox.showerror("Uninstall", msg, parent=self)
 
+    def _on_report_click(self):
+        if not self.selected_skill:
+            return
+        name = self.selected_skill
+
+        dlg = tk.Toplevel(self)
+        dlg.title(f"Report '{name}'")
+        dlg.configure(bg=BG)
+        dlg.geometry("480x360")
+        dlg.transient(self)
+        dlg.grab_set()
+        apply_theme(dlg)
+
+        pad = ttk.Frame(dlg, style="Panel.TFrame")
+        pad.pack(fill="both", expand=True)
+
+        ttk.Label(pad, text="REPORT SKILL", style="Header.TLabel").pack(
+            anchor="w", padx=20, pady=(16, 4))
+        ttk.Label(pad, text=f"Reporting: {name}",
+                  style="Sub.TLabel").pack(anchor="w", padx=20, pady=(0, 14))
+
+        body = tk.Frame(pad, bg=BG_PANEL)
+        body.pack(fill="both", expand=True, padx=20)
+
+        ttk.Label(body, text="Reason (short)", style="Panel.TLabel").pack(anchor="w")
+        reason_entry = ttk.Entry(body, font=("Segoe UI", 11))
+        reason_entry.pack(fill="x", pady=(2, 12))
+        reason_entry.focus_set()
+
+        ttk.Label(body, text="Details (optional)", style="Panel.TLabel").pack(anchor="w")
+        details_text = tk.Text(body, height=6, bg=BG_CARD, fg=FG,
+                               relief="flat", padx=8, pady=6,
+                               font=("Segoe UI", 10), wrap="word")
+        details_text.pack(fill="both", expand=True)
+
+        row = tk.Frame(pad, bg=BG_PANEL)
+        row.pack(fill="x", padx=20, pady=(12, 16))
+        ttk.Button(row, text="Cancel", command=dlg.destroy).pack(side="right")
+
+        def submit():
+            reason = reason_entry.get().strip()
+            details = details_text.get("1.0", "end").strip()
+            if not reason:
+                messagebox.showerror("Report", "Reason required", parent=dlg)
+                return
+
+            def work():
+                try:
+                    api("POST", "/report", self.cfg, auth=False, body={
+                        "skill": name,
+                        "reason": reason,
+                        "details": details,
+                    })
+                    dlg.after(0, lambda: (
+                        messagebox.showinfo("Report",
+                                            "Thanks — report submitted.",
+                                            parent=self),
+                        dlg.destroy(),
+                        self.refresh_skills(),
+                    ))
+                except ApiError as ex:
+                    msg = str(ex)
+                    dlg.after(0, lambda m=msg: messagebox.showerror(
+                        "Report", m, parent=dlg))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        ttk.Button(row, text="Submit", style="Accent.TButton",
+                   command=submit).pack(side="right", padx=(0, 8))
+
     def _on_delete_click(self):
         if not self.selected_skill:
             return
@@ -1095,8 +1346,8 @@ class SkillStore(tk.Tk):
         if not messagebox.askyesno(
                 "Delete from server",
                 f"Permanently delete '{name}' from the server?\n\n"
-                f"This cannot be undone. Other users will no longer be able "
-                f"to install it.",
+                "This cannot be undone. Other users will no longer be able "
+                "to install it.",
                 parent=self):
             return
         confirm = messagebox.askstring(
@@ -1148,8 +1399,13 @@ class SkillStore(tk.Tk):
         dlg = PublishDialog(self, self.cfg)
         self.wait_window(dlg)
         if dlg.result:
-            self.set_status(
-                f"✓ published {dlg.result['name']} v{dlg.result['version']}")
+            status = (dlg.result or {}).get("status", "")
+            name = dlg.result.get("name", "?")
+            version = dlg.result.get("version", "?")
+            if status == "published":
+                self.set_status(f"✓ published {name} v{version}")
+            elif status == "queued_for_review":
+                self.set_status(f"⏳ {name} v{version} queued for review")
             self._refresh_me(silent=True)
             self.refresh_skills()
 
@@ -1158,7 +1414,7 @@ class SkillStore(tk.Tk):
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry
 # ---------------------------------------------------------------------------
 
 def main():

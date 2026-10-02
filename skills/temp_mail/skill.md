@@ -2,8 +2,12 @@
 name: temp_mail
 description: Temporary email with multi-provider send and receive.
 version: 1.0.0
-author: abdo
+author: admin
 ---
+
+# temp_mail
+
+Temporary email with multi-provider send and receive.
 
 # temp_mail
 
