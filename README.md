@@ -8,7 +8,7 @@ plug-and-play skill system backed by a hosted skill registry.
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20GPL--3.0-green)](#license)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#platform-support)
 
-**Live site:** https://agent-code.freesrv.com · **Install:** `pip install agent-code`
+**Live site:** https://agent-code.page.gd · **Install:** `pip install agent-code`
 
 ---
 
