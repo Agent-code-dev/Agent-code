@@ -29,3 +29,4 @@ env/
 # os
 Thumbs.db
 desktop.ini
+test-venv/

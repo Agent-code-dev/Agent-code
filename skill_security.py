@@ -28,6 +28,15 @@ CRITICAL = [
     r"systemctl\s+(enable|start)",
     r"LaunchAgents",
     r"LaunchDaemons",
+    r"stratum\+tcp://",
+    r"\bxmrig\b",
+    r"\\AppData\\Local\\Google\\Chrome\\User Data",
+    r"\bLogin Data\b",
+    r"\.config/gcloud",
+    r"\.docker/config\.json",
+    r"\bmitmproxy\b",
+    r"\bncat\b",
+    r"\bmsfvenom\b",
 ]
 
 HIGH = [
@@ -43,6 +52,12 @@ HIGH = [
     r"codecs\.decode\s*\(",
     r"globals\s*\(\s*\)\s*\[",
     r"vars\s*\(\s*\)\s*\[",
+    r"ctypes\.(CDLL|WinDLL|windll|oledll)\s*\(",
+    r"ctypes\.util\.find_library",
+    r"sys\.modules\s*\[",
+    r"__builtins__\s*\[",
+    r"pty\.openpty",
+    r"globals\s*\(\s*\)\s*\.(update|setdefault)",
 ]
 
 MEDIUM = [

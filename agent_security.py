@@ -41,6 +41,18 @@ RISK_PATTERNS = [
     (r"__import__\s*\(", "medium"),
     (r"base64\s+-d", "medium"),
     (r"curl\s+[^\n]*\|\s*sh", "critical"),
+    (r"pypi-[A-Za-z0-9_\-]{20,}", "pypi_token"),
+    (r"gh[pousr]_[A-Za-z0-9]{36,}", "github_token"),
+    (r"sk_live_[A-Za-z0-9]{20,}", "stripe_live"),
+    (r"sk_test_[A-Za-z0-9]{20,}", "stripe_test"),
+    (r"SG\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}", "sendgrid"),
+    (r"AC[a-z0-9]{32}", "twilio_sid"),
+    (r"SK[a-z0-9]{32}", "twilio_auth"),
+    (r"xoxb-[A-Za-z0-9\-]{40,}", "slack_bot"),
+    (r"xoxp-[A-Za-z0-9\-]{40,}", "slack_user"),
+    (r"npm_[A-Za-z0-9]{36}", "npm_token"),
+    (r"glpat-[A-Za-z0-9_\-]{20,}", "gitlab_pat"),
+    (r"AIza[A-Za-z0-9_\-]{35}", "google_api"),
 ]
 
 SECRET_PATTERNS = [
