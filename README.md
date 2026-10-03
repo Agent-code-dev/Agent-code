@@ -425,7 +425,7 @@ Agent-code/
 Clone the repo, install in editable mode:
 
 ```bash
-git clone https://github.com/minecraftbefile-maker/Agent-code.git
+git clone https://github.com/Agent-code-dev/Agent-code
 cd Agent-code
 pip install -e .
 ```

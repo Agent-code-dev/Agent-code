@@ -1,7 +1,8 @@
 {
-  "openai_api_keys": ["sk-REPLACE_ME"],
-  "openai_base_url": "https://api.openai.com/v1",
-  "openai_model": "gpt-4o",
+  "openai_api_keys": ["sk-your-key-here"],
+  "openai_base_url": "https://openrouter.ai/api/v1",
+  "openai_model": "openrouter/free",
+  "permission_mode": "ask",
   "cloud_sync": false,
   "disabled_skills": []
 }

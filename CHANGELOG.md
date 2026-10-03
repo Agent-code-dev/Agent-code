@@ -1,3 +1,18 @@
+## [1.0.2] - 2026-10-03
+
+### Added
+- skills/browser/ - DrissionPage wrapped as a proper skill folder.
+  Six tools: browser_navigate, browser_snapshot, browser_click,
+  browser_type, browser_links, browser_scroll, plus /browser-close.
+
+### Fixed
+- terminal.py API-key rotation crashed after 1000 x len(KEYS) requests.
+- terminal.py passed a callable where the OpenAI SDK expects a string.
+- terminal.py /reset printed "memory cleared" but kept no memory.
+- terminal.py shell_run prompted even in readonly mode.
+- terminal.py stray import in the module body.
+- Moved skills/loader.py -> loader.py for clean pip import.
+
 ﻿# Changelog
 
 All notable changes to this project are documented here.
