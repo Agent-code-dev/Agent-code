@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Skills — Developer Guide</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --card: #1c2128;
+    --border: #30363d;
+    --fg: #c9d1d9;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; height: auto !important; }
+  }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 24px 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .sidebar h1 {
+    font-size: 16px;
+    color: var(--accent);
+    margin: 0 0 4px;
+    letter-spacing: 0.5px;
+  }
+  .sidebar .ver {
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 20px;
+  }
+  .sidebar nav a {
+    display: block;
+    color: var(--fg);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin: 1px 0;
+  }
+  .sidebar nav a:hover {
+    background: var(--card);
+    text-decoration: none;
+  }
+  .sidebar nav .sub {
+    padding-left: 20px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+
+  /* Main */
+  main {
+    padding: 40px 60px 80px;
+    max-width: 900px;
+  }
+  @media (max-width: 900px) {
+    main { padding: 24px 20px 60px; }
+  }
+  h1.section {
+    font-size: 28px;
+    margin: 48px 0 8px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: #fff;
+  }
+  h1.section:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+  h2 {
+    font-size: 20px;
+    margin: 32px 0 10px;
+    color: #fff;
+  }
+  h3 {
+    font-size: 16px;
+    margin: 24px 0 8px;
+    color: var(--accent);
+  }
+  p { margin: 10px 0; }
+  code {
+    background: var(--card);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font: 13px/1.5 "Cascadia Mono", Consolas, "SF Mono", monospace;
+    color: var(--fg);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font: 13px/1.5 "Cascadia Mono", Consolas, "SF Mono", monospace;
+    margin: 12px 0;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 13px;
+  }
+  .lead {
+    font-size: 16px;
+    color: var(--dim);
+    margin: 8px 0 24px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  .card h3 { margin-top: 0; }
+  .pill {
+    display: inline-block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+    color: var(--dim);
+    margin-right: 6px;
+  }
+  .pill.green { color: var(--green); border-color: #1a7f37; }
+  .pill.yellow { color: var(--yellow); border-color: #9e6a03; }
+  .pill.red { color: var(--red); border-color: #8b1a1a; }
+  .pill.purple { color: var(--purple); border-color: #6e40c9; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--dim); font-weight: 600; }
+  td code { font-size: 12px; }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--panel);
+    padding: 12px 16px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+  }
+  .callout.warn { border-left-color: var(--yellow); }
+  .callout.danger { border-left-color: var(--red); }
+  .callout.ok { border-left-color: var(--green); }
+
+  .toc-num { color: var(--dim); margin-right: 6px; font-variant-numeric: tabular-nums; }
+
+  .footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--dim);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ========================================================== -->
+  <!-- SIDEBAR -->
+  <!-- ========================================================== -->
+  <aside class="sidebar">
+    <h1>AGENT SKILLS</h1>
+    <div class="ver">Developer guide · v1.0</div>
+    <nav>
+      <a href="#overview"><span class="toc-num">1</span>Overview</a>
+      <a href="#anatomy"><span class="toc-num">2</span>Skill anatomy</a>
+      <a href="#contract"><span class="toc-num">3</span>The contract</a>
+      <a href="#hello" class="sub">Hello World</a>
+      <a href="#tools" class="sub">Tools</a>
+      <a href="#commands" class="sub">Chat commands</a>
+      <a href="#metadata" class="sub">Metadata</a>
+      <a href="#lifecycle"><span class="toc-num">4</span>Lifecycle</a>
+      <a href="#sandbox"><span class="toc-num">5</span>Sandbox</a>
+      <a href="#publishing"><span class="toc-num">6</span>Publishing</a>
+      <a href="#installing"><span class="toc-num">7</span>Installing</a>
+      <a href="#examples"><span class="toc-num">8</span>Examples</a>
+      <a href="#recipes" class="sub">Common recipes</a>
+      <a href="#debug"><span class="toc-num">9</span>Debugging</a>
+      <a href="#reference"><span class="toc-num">10</span>API reference</a>
+    </nav>
+  </aside>
+
+  <!-- ========================================================== -->
+  <!-- MAIN -->
+  <!-- ========================================================== -->
+  <main>
+
+    <h1 class="section" id="overview"><span class="toc-num">1 ·</span> Overview</h1>
+    <p class="lead">A skill is a self-contained folder that adds tools and/or chat commands to the agent — no changes to the agent source needed.</p>
+
+    <p>The agent ships with a small core: <span class="pill">browser</span><span class="pill">shell</span>. Everything else — email, filesystem, public API search — is a <strong>skill</strong>.</p>
+
+    <p>Skills are discovered at startup, loaded dynamically, and their tools are merged into the LLM's tool list. Disabling a skill removes its tools and commands from the running agent immediately.</p>
+
+    <div class="callout ok">
+      <strong>Why skills?</strong> You never edit <code>agent.py</code> to add a capability. You write a folder, drop it in <code>skills/</code>, and the agent picks it up on restart (or instantly via the Skills dialog if already loaded).
+    </div>
+
+    <h3>The three contracts</h3>
+    <p>Every skill exports up to three things from its <code>skill.py</code>:</p>
+
+    <table>
+      <thead>
+        <tr><th>Export</th><th>Purpose</th><th>Required?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>SKILL</code></td>
+          <td>Metadata dict: name, description</td>
+          <td><span class="pill red">Yes</span></td>
+        </tr>
+        <tr>
+          <td><code>TOOL_SCHEMAS</code> + <code>TOOL_CALLABLES</code></td>
+          <td>Tools the LLM can call</td>
+          <td><span class="pill yellow">Optional</span></td>
+        </tr>
+        <tr>
+          <td><code>COMMANDS</code></td>
+          <td>Slash commands the user can type (<code>/email</code>, etc.)</td>
+          <td><span class="pill yellow">Optional</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h1 class="section" id="anatomy"><span class="toc-num">2 ·</span> Skill anatomy</h1>
+
+    <p>A skill is a folder. The folder name becomes the skill name unless <code>skill.md</code> overrides it.</p>
+
+    <pre><code>man-code/
+└── skills/
+    └── my_skill/
+        ├── skill.py       ← code: metadata + tools + commands
+        └── skill.md       ← docs: frontmatter + human notes</code></pre>
+
+    <table>
+      <thead><tr><th>File</th><th>Purpose</th><th>Required?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>skill.py</code></td>
+          <td>Python module. Exports <code>SKILL</code>, optionally <code>TOOL_SCHEMAS</code>, <code>TOOL_CALLABLES</code>, <code>COMMANDS</code>.</td>
+          <td><span class="pill red">Yes</span></td>
+        </tr>
+        <tr>
+          <td><code>skill.md</code></td>
+          <td>Markdown with YAML frontmatter. Supplies <code>name</code>, <code>description</code>, <code>version</code>, <code>author</code>. Anything below the frontmatter is free-form docs.</td>
+          <td><span class="pill yellow">Optional but recommended</span></td>
+        </tr>
+        <tr>
+          <td>any other files</td>
+          <td>Templates, data files, images — whatever your skill needs. Read them via <code>Path(__file__).parent</code>.</td>
+          <td><span class="pill yellow">Optional</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h1 class="section" id="contract"><span class="toc-num">3 ·</span> The contract</h1>
+
+    <h2 id="hello">Hello World — the smallest possible skill</h2>
+
+    <pre><code># skills/greet/skill.py
+SKILL = {
+    "name": "greet",
+    "description": "Say hello.",
+}
+
+def hello(name: str = "world") -&gt; str:
+    return f"Hello, {name}!"
+
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "hello",
+            "description": "Return a greeting for a given name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+            },
+        },
+    },
+]
+
+TOOL_CALLABLES = {
+    "hello": hello,
+}</code></pre>
+
+    <p>That's it. Restart the agent, and the LLM can now call <code>hello(name="..."</code>.</p>
+
+    <h2 id="tools">Tools — what the LLM calls</h2>
+
+    <p>A tool has two halves:</p>
+
+    <table>
+      <thead><tr><th>Half</th><th>What it is</th><th>Where it goes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Schema</strong></td>
+          <td>A JSON function signature describing the tool: name, description, parameters, which are required.</td>
+          <td><code>TOOL_SCHEMAS</code> (list)</td>
+        </tr>
+        <tr>
+          <td><strong>Callable</strong></td>
+          <td>The Python function that actually does the work.</td>
+          <td><code>TOOL_CALLABLES</code> (dict)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      The <strong>schema name</strong> and the <strong>callable key</strong> must match. The LLM calls <code>hello</code>, the loader looks up <code>TOOL_CALLABLES["hello"]</code>, calls it with the decoded arguments.
+    </div>
+
+    <h3>Rules for tool functions</h3>
+    <ul>
+      <li><strong>Return a string</strong>. The agent sends the whole string back to the LLM as the tool result.</li>
+      <li><strong>Prefix errors with <code>ERROR:</code>, <code>BLOCKED:</code>, or <code>NOT_FOUND:</code></strong>. The agent uses these prefixes to color the log red and the LLM understands the call failed.</li>
+      <li><strong>Be concise.</strong> Tool results are truncated at ~4,000 chars before going to the LLM. Long outputs waste context — summarise.</li>
+      <li><strong>Never raise</strong> if you can avoid it. Wrap risky code in <code>try/except</code> and return an error string. Uncaught exceptions still get caught by the agent, but you lose the ability to give the LLM a helpful hint.</li>
+    </ul>
+
+    <h3>Schema shape</h3>
+
+    <pre><code>{
+  "type": "function",
+  "function": {
+    "name": "my_tool",                 # must match callable key
+    "description": "One clear sentence about what this does.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "arg1": {"type": "string", "description": "what this is"},
+        "arg2": {"type": "integer"},
+        "flag": {"type": "boolean", "default": False}
+      },
+      "required": ["arg1"]              # omit args with defaults
+    }
+  }
+}</code></pre>
+
+    <p>Supported parameter types: <code>string</code>, <code>integer</code>, <code>number</code>, <code>boolean</code>, <code>array</code>, <code>object</code>. Most providers support these six.</p>
+
+    <h2 id="commands">Chat commands — what the user types</h2>
+
+    <p>Commands are slash-prefixed and dispatched to the skill's handler directly. They don't go through the LLM — they run instantly.</p>
+
+    <pre><code># skills/mystuff/skill.py
+
+def _handle_ping(args: list, log) -&gt; None:
+    """args = tokens after '/ping'. log(text, tag=None) writes to the chat."""
+    log(f"pong {' '.join(args)}", "dim")
+
+def _handle_echo(args: list, log) -&gt; None:
+    log(" ".join(args) or "(empty)", "user")
+
+COMMANDS = {
+    "ping": {
+        "handler": _handle_ping,
+        "description": "Reply pong",
+    },
+    "echo": {
+        "handler": _handle_echo,
+        "description": "Echo back the arguments",
+    },
+}</code></pre>
+
+    <p>User types <code>/ping hi</code> → agent calls <code>_handle_ping(["hi"], log)</code>. The command name is stripped from <code>args</code>.</p>
+
+    <h3>The <code>log</code> function</h3>
+    <p>The second argument to every command handler is a logging function. It accepts a message and an optional style tag:</p>
+
+    <table>
+      <thead><tr><th>Tag</th><th>Color</th><th>Use for</th></tr></thead>
+      <tbody>
+        <tr><td><code>"user"</code></td><td>yellow, bold</td><td>user input echoes</td></tr>
+        <tr><td><code>"agent"</code></td><td>green, bold</td><td>agent final answers</td></tr>
+        <tr><td><code>"tool"</code></td><td>blue</td><td>tool call lines</td></tr>
+        <tr><td><code>"result"</code></td><td>purple</td><td>tool results</td></tr>
+        <tr><td><code>"error"</code></td><td>red</td><td>errors, blocks</td></tr>
+        <tr><td><code>"dim"</code></td><td>grey</td><td>info lines</td></tr>
+        <tr><td><code>"turn"</code></td><td>grey italic</td><td>turn counters</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <code>log()</code> is thread-safe. Command handlers run on the main thread (they're called from <code>on_send</code>), but tool functions may run on a worker thread — always use <code>log()</code> for output, never <code>print()</code>.
+    </div>
+
+    <h2 id="metadata">Metadata — <code>skill.md</code></h2>
+
+    <p><code>skill.md</code> is optional but useful: it lets you version a skill, credit an author, and long-describe it, without touching <code>skill.py</code>.</p>
+
+    <pre><code>---
+name: my_skill
+description: One-sentence summary shown in the UI and the Skills dialog.
+version: 1.0.0
+author: yourname
+---
+
+# my_skill
+
+Longer docs go here. Anything after the closing `---` is free-form
+Markdown. The agent ignores it — it's for humans browsing the skill.</code></pre>
+
+    <table>
+      <thead><tr><th>Field</th><th>Used where</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code></td><td>Registry key, folder name override, "Yours" column</td></tr>
+        <tr><td><code>description</code></td><td>Skills dialog, Help dialog, publish dialog</td></tr>
+        <tr><td><code>version</code></td><td>Skills dialog, publish dialog, update detection</td></tr>
+        <tr><td><code>author</code></td><td>Skills dialog, publish dialog</td></tr>
+      </tbody>
+    </table>
+
+    <p>If <code>skill.md</code> is missing, the folder name is used and the description comes from <code>SKILL["description"]</code>.</p>
+
+    <h1 class="section" id="lifecycle"><span class="toc-num">4 ·</span> Lifecycle</h1>
+
+    <p>From boot to shutdown, here's exactly what happens:</p>
+
+    <table>
+      <thead><tr><th>Step</th><th>What runs</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1. Discovery</td>
+          <td><code>loader.discover_skills()</code> scans <code>skills/*/skill.py</code>. Reads <code>skill.md</code> frontmatter (no code executed). Used by the Skills dialog and Help.</td>
+        </tr>
+        <tr>
+          <td>2. Loading</td>
+          <td><code>loader.load_skills()</code> imports each enabled <code>skill.py</code> as a module. Collects <code>SKILL</code>, <code>TOOL_SCHEMAS</code>, <code>TOOL_CALLABLES</code>, <code>COMMANDS</code>.</td>
+        </tr>
+        <tr>
+          <td>3. Merge</td>
+          <td>All schemas are merged into one list. All callables into one dict. All commands into one dict. Duplicate names — later skill wins (alphabetical order).</td>
+        </tr>
+        <tr>
+          <td>4. Prompt</td>
+          <td>Skill <code>SKILL["description"]</code> values are appended to the system prompt so the LLM knows what's available.</td>
+        </tr>
+        <tr>
+          <td>5. Runtime</td>
+          <td>LLM calls a tool → agent looks up the callable → runs it → sends result back. User types <code>/cmd</code> → agent finds the handler → runs it. No LLM involved for commands.</td>
+        </tr>
+        <tr>
+          <td>6. Toggle</td>
+          <td>Disabling a skill in the Skills dialog removes it from <code>self.disabled_skills</code>, saves to config, and calls <code>_reload_tools()</code>. That re-runs steps 2–4 without restarting the agent.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <strong>Reloading is not a restart.</strong> When you toggle a skill, its module is re-imported fresh. Any module-level state (caches, connections) is lost. If your skill needs persistent state across reloads, store it in a file — never in a module-level variable.
+    </div>
+
+    <h1 class="section" id="sandbox"><span class="toc-num">5 ·</span> Sandbox</h1>
+
+    <p>Every skill has access to two environment variables that tell it where it's allowed to touch the disk:</p>
+
+    <table>
+      <thead><tr><th>Env var</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>AGENT_WORKSPACE</code></td><td>Absolute path to <code>man-code/workspace/</code></td></tr>
+      </tbody>
+    </table>
+
+    <p>Read it like this:</p>
+
+    <pre><code>import os
+from pathlib import Path
+
+WORKSPACE = Path(os.environ["AGENT_WORKSPACE"]).resolve()
+
+def write_thing(name: str, content: str) -&gt; str:
+    p = (WORKSPACE / name).resolve()
+    if not str(p).startswith(str(WORKSPACE)):
+        return "ERROR: path escapes workspace"
+    p.write_text(content, encoding="utf-8")
+    return f"OK wrote {len(content)} chars"</code></pre>
+
+    <div class="callout danger">
+      <strong>Always validate paths.</strong> The shell tool enforces the sandbox. Tool functions do not — it's the skill author's job. A skill that writes to arbitrary paths can be tricked into overwriting system files by a malicious prompt.
+    </div>
+
+    <h3>The agent config file</h3>
+    <p>Skills that need persistent configuration (API keys, settings) should read and write <code>agent_config.json</code> at the project root:</p>
+
+    <pre><code>ROOT = Path(os.environ["AGENT_WORKSPACE"]).resolve().parent
+CFG  = ROOT / "agent_config.json"
+
+def load_cfg() -&gt; dict:
+    if CFG.exists():
+        return json.loads(CFG.read_text(encoding="utf-8"))
+    return {}
+
+def save_cfg(c: dict):
+    CFG.write_text(json.dumps(c, indent=2), encoding="utf-8")</code></pre>
+
+    <p>Read the existing config, update a key, write it back. Never overwrite the whole file — the user's API keys are in there.</p>
+
+    <h1 class="section" id="publishing"><span class="toc-num">6 ·</span> Publishing</h1>
+
+    <p>To share a skill with others, publish it to the registry via <code>skill-manager.py</code>.</p>
+
+    <ol>
+      <li>Make sure the skill folder contains <code>skill.py</code> (required) and <code>skill.md</code> (recommended).</li>
+      <li>Sign in: <code>python skill-manager.py register yournickname</code></li>
+      <li>Open the GUI: <code>python skill-manager.py</code>, or use the CLI:<br>
+        <code>python skill-manager.py publish skills/my_skill --name my_skill --description "..."</code></li>
+      <li>Click <strong>Publish</strong>. The folder is zipped in memory and uploaded.</li>
+    </ol>
+
+    <h3>What gets uploaded</h3>
+    <p>Every file inside the folder, recursively. <strong>Exclude</strong> anything you don't want in the archive — usually you want to keep the folder tidy:</p>
+    <ul>
+      <li>Ignore <code>__pycache__/</code>, <code>*.pyc</code>, <code>.git/</code></li>
+      <li>Ignore any secrets, tokens, or <code>.env</code> files</li>
+      <li>Ignore large binary assets — the max upload is 5 MB</li>
+    </ul>
+
+    <h3>Versioning</h3>
+    <p>Republishing a skill with the same name and a new version replaces the stored archive. Users who reinstall get the new version. There's no automatic notification — bump the version in <code>skill.md</code> when you want to signal a change.</p>
+
+    <h1 class="section" id="installing"><span class="toc-num">7 ·</span> Installing</h1>
+
+    <p>From the store GUI:</p>
+    <ol>
+      <li><code>python skill-manager.py</code></li>
+      <li>Sign in, browse, click a skill, click <strong>Install</strong>.</li>
+      <li>Restart the agent, or use the Skills dialog → toggle the skill on.</li>
+    </ol>
+
+    <p>From the CLI:</p>
+    <pre><code>python skill-manager.py install my_skill</code></pre>
+
+    <p>From the agent itself (once signed in): install the skill via the store, then toggle it in the Skills dialog. The agent does not auto-install skills.</p>
+
+    <h1 class="section" id="examples"><span class="toc-num">8 ·</span> Examples</h1>
+
+    <h2 id="recipes">Common recipes</h2>
+
+    <div class="card">
+      <h3>Stateless HTTP fetch</h3>
+      <pre><code>import urllib.request, json
+
+def fetch_json(url: str) -&gt; str:
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            data = json.loads(r.read())
+        return json.dumps(data, indent=2)[:3000]
+    except Exception as e:
+        return f"ERROR: {e}"</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Reading a template file from the skill folder</h3>
+      <pre><code>from pathlib import Path
+SKILL_DIR = Path(__file__).parent
+
+def render(template_name: str, values: dict) -&gt; str:
+    tpl = (SKILL_DIR / "templates" / template_name).read_text()
+    return tpl.format(**values)</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Auto-installing a dependency at first use</h3>
+      <pre><code>import importlib, subprocess, sys
+
+_installed = set()
+
+def ensure(pkg: str):
+    if pkg in _installed:
+        return
+    try:
+        __import__(pkg)
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip",
+                        "install", "--quiet", pkg], check=True)
+        importlib.invalidate_caches()
+    _installed.add(pkg)</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Persisting state across runs</h3>
+      <pre><code>import json, os
+from pathlib import Path
+STATE = Path(os.environ["AGENT_WORKSPACE"]) / ".myskill.json"
+
+def load_state() -&gt; dict:
+    return json.loads(STATE.read_text()) if STATE.exists() else {}
+
+def save_state(s: dict):
+    STATE.write_text(json.dumps(s, indent=2))</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Fallback chain across multiple providers</h3>
+      <pre><code>def call_with_fallback(payload):
+    errors = []
+    for provider in ["https://api.a.com", "https://api.b.com"]:
+        try:
+            r = requests.post(provider, json=payload, timeout=20)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            errors.append(f"{provider}: {e}")
+    return {"error": "all failed: " + "; ".join(errors)}</code></pre>
+    </div>
+
+    <h1 class="section" id="debug"><span class="toc-num">9 ·</span> Debugging</h1>
+
+    <h3>Skill not loading?</h3>
+    <table>
+      <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>[loader] FAILED to import 'x'</code></td>
+          <td>Syntax error or missing dependency in <code>skill.py</code></td>
+          <td>Run <code>python skills/x/skill.py</code> manually to see the error.</td>
+        </tr>
+        <tr>
+          <td>Skill listed but tools don't work</td>
+          <td><code>TOOL_SCHEMAS</code> names don't match <code>TOOL_CALLABLES</code> keys</td>
+          <td>Double-check the <code>"name"</code> field in each schema against the dict keys.</td>
+        </tr>
+        <tr>
+          <td>Command not found</td>
+          <td><code>COMMANDS</code> dict missing or malformed</td>
+          <td>Every entry needs <code>"handler"</code> and <code>"description"</code>. Check the log for <code>skipping malformed command</code>.</td>
+        </tr>
+        <tr>
+          <td>LLM never calls the tool</td>
+          <td>Schema description too vague</td>
+          <td>Rewrite the description to be explicit about <em>when</em> to use it, not just what it does.</td>
+        </tr>
+        <tr>
+          <td>Skill disappeared after toggle</td>
+          <td>Toggle added it to <code>disabled_skills</code> in config</td>
+          <td>Open the Skills dialog, toggle it back on. Or clear <code>disabled_skills</code> in <code>agent_config.json</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Logging from a skill</h3>
+    <p>Two options depending on context:</p>
+    <ul>
+      <li><strong>Inside a tool function:</strong> return a string. It goes to the LLM and shows in the log.</li>
+      <li><strong>Inside a command handler:</strong> call <code>log(text, tag)</code>. It goes directly to the chat.</li>
+      <li><strong>Anywhere:</strong> <code>print()</code> writes to the console (terminal), useful for debugging but hidden from the user.</li>
+    </ul>
+
+    <h3>Testing without the agent</h3>
+    <p>Skills are plain Python. You can import them directly:</p>
+    <pre><code>cd man-code
+python -c "import sys; sys.path.insert(0, 'skills');
+           import my_skill;
+           print(my_skill.my_tool(arg='value'))"</code></pre>
+
+    <h1 class="section" id="reference"><span class="toc-num">10 ·</span> API reference</h1>
+
+    <h2>Module-level exports</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Type</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>SKILL</code></td>
+          <td>dict</td>
+          <td><code>{"name": "x", "description": "..."}</code></td>
+        </tr>
+        <tr>
+          <td><code>TOOL_SCHEMAS</code></td>
+          <td>list of dicts</td>
+          <td>OpenAI function-calling format</td>
+        </tr>
+        <tr>
+          <td><code>TOOL_CALLABLES</code></td>
+          <td>dict[str, callable]</td>
+          <td><code>{"tool_name": fn}</code></td>
+        </tr>
+        <tr>
+          <td><code>COMMANDS</code></td>
+          <td>dict[str, dict]</td>
+          <td><code>{"cmd": {"handler": fn, "description": "..."}}</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Function signatures</h2>
+    <table>
+      <thead><tr><th>Kind</th><th>Signature</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Tool callable</td>
+          <td><code>def name(arg1, arg2=default) -&gt; str</code></td>
+        </tr>
+        <tr>
+          <td>Command handler</td>
+          <td><code>def name(args: list, log: callable) -&gt; None</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Environment variables</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>AGENT_WORKSPACE</code></td>
+          <td>Absolute path to <code>workspace/</code>. Set by the agent at startup.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Log tags</h2>
+    <p><code>user</code>, <code>agent</code>, <code>tool</code>, <code>result</code>, <code>error</code>, <code>dim</code>, <code>turn</code> — see <a href="#commands">§3 Chat commands</a>.</p>
+
+    <h2>Files the agent owns</h2>
+    <table>
+      <thead><tr><th>Path</th><th>Who writes it</th></tr></thead>
+      <tbody>
+        <tr><td><code>agent_config.json</code></td><td>Agent (Settings dialog), skills that need config</td></tr>
+        <tr><td><code>chats/current.json</code></td><td>Agent (auto-save + Save button)</td></tr>
+        <tr><td><code>workspace/</code></td><td>Agent sandbox — everything you write goes here</td></tr>
+        <tr><td><code>skills/&lt;name&gt;/</code></td><td>Skill manager (install), you (authoring)</td></tr>
+        <tr><td><code>~/.skill-manager.json</code></td><td>Skill manager (auth token, server, cache)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      Agent Skills Developer Guide · Open source · MIT<br>
+      Read alongside <code>skills/loader.py</code> — it's ~120 lines and shows exactly what happens at each step.
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>
