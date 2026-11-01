@@ -661,4 +661,4 @@ Task reports include verified changed-file lists and, when text files can be saf
 
 ## Recent development
 
-See [Visual Diff Review release notes](RELEASE-NOTES-2.0.0.md).
+See [release notes](RELEASE-NOTES-2.0.0.md).
