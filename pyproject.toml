@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-code"
+version = "2.0.0"
+description = "Local AI agent with optional browser automation, sandboxed shell, and plug-and-play skills"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "minecraftbefile-maker" }]
+keywords = ["ai", "agent", "llm", "browser", "automation", "skills", "openai"]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+    "openai>=1.0.0",
+    "customtkinter>=5.2.2",
+    "markdown-it-py>=3.0.0",
+    "mcp>=1.9,<2",
+    "keyring>=24.2",
+    "paramiko>=3.4.0",
+    "requests>=2.31.0",
+    "DrissionPage>=4.1.1.4",
+    "selenium>=4.20.0",
+]
+
+[project.urls]
+Homepage   = "https://agent-code-dev.github.io"
+Repository = "https://github.com/Agent-code-dev/Agent-code"
+Issues     = "https://github.com/Agent-code-dev/Agent-code/issues"
+Changelog  = "https://github.com/Agent-code-dev/Agent-code/releases"
+
+[project.scripts]
+agent-code = "agent_code.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_code = [
+    "data/skills/*/*.py",
+    "data/skills/*/*.md",
+    "data/icons/*.png",
+    "data/icons/*.ico",
+]
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
