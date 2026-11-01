@@ -656,9 +656,9 @@ model request. Use `!command` to force direct shell execution; recognized execut
 commands are dispatched directly, while natural-language requests go to the agent.
 
 ### Task completion summaries
-Task reports include verified changed-file lists and, when text files can be safely decoded, aggregate line additions and deletions. Binary files are identified without fabricating line counts. See `RELEASE-NOTES-2.0.0-TASK-DIFF-SUMMARY.md`.
+Task reports include verified changed-file lists and, when text files can be safely decoded, aggregate line additions and deletions. Binary files are identified without fabricating line counts. See `RELEASE-NOTES-2.0.0.md`.
 
 
 ## Recent development
 
-See [Visual Diff Review release notes](RELEASE-NOTES-2.0.0-VISUAL-DIFF-REVIEW.md).
+See [Visual Diff Review release notes](RELEASE-NOTES-2.0.0.md).
