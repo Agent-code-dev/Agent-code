@@ -24,7 +24,7 @@
   <a href="https://pypi.org/project/agent-code/">
     <img src="https://img.shields.io/badge/PyPI-Install-3775A9?style=flat-square&logo=pypi" alt="PyPI">
   </a>
-  <a href="https://agent-code.page.gd">
+  <a href="https://agent-code-dev.github.io">
     <img src="https://img.shields.io/badge/Website-Visit-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Website">
   </a>
 </p><p align="center">
