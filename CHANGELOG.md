@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0] - 2026-11-01
+## [2.0.0]
 
 ### ✨ Added
 - **Desktop Workspace (CustomTkinter GUI)**: A completely rebuilt, lightweight desktop interface. Features conversation view, project navigation, Markdown rendering, and live model/provider selection.
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.5] - 2025-XX-XX
+## [1.0.5]
 *(Final stable release of the 1.x line)*
 
 ### 🐛 Fixed
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.4] - 2025-XX-XX
+## [1.0.4]
 
 ### ✨ Added
 - Added `/usage` command to track token consumption.
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.3] - 2025-XX-XX
+## [1.0.3]
 
 ### 🔧 Changed
 - Updated default model configurations for OpenAI-compatible endpoints.
@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.2] - 2025-XX-XX
+## [1.0.2]
 
 ### 🐛 Fixed
 - Resolved an issue where the headless browser (DrissionPage) would occasionally fail to launch on Windows.
@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.1] - 2025-XX-XX
+## [1.0.1]
 
 ### ✨ Added
 - Initial PyPI release patches.
@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] - 2025-XX-XX
+## [1.0.0]
 *(Initial Release)*
 
 ### ✨ Added
