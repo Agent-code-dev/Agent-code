@@ -1004,7 +1004,7 @@ See:
   ·
   <a href="https://pypi.org/project/agent-code/">PyPI</a>
   ·
-  <a href="https://agent-code.page.gd">Website</a>
+  <a href="https://agent-code-dev.github.io">Website</a>
 </p><p align="center">
   <sub>Built with Python · Designed for extensibility</sub>
 </p>

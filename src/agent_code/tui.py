@@ -39,7 +39,7 @@ def api_keys(cfg):
 class TUI:
     def __init__(self, screen):
         self.s=screen; self.cfg=read_config(); self.messages=[]; self.notice="Welcome. Press ? for help."; self.mode="Build"
-        self.input=""; self.scroll=0; self.cwd="."; self.page="Chat"; self.running=True; self.busy=False; self.cancel_event=threading.Event(); self.events=queue.Queue(); self.activity=["Ready — send a task to watch agent progress."]; self.tool_details=[]
+        self.input=""; self.scroll=0; self.cwd="."; self.page="Chat"; self.running=True; self.busy=False; self.cancel_event=threading.Event(); self.events=queue.Queue(); self.activity=["Ready — send a task to watch agent progress."]; self.tool_details=[]; self.activity_scroll=0; self.stream_text=""
         curses.curs_set(1); curses.start_color(); curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1); curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)
         curses.init_pair(3, curses.COLOR_GREEN, -1); curses.init_pair(4, curses.COLOR_YELLOW, -1)
@@ -137,14 +137,24 @@ class TUI:
         elif self.page=="Activity":
             self.safe_add(4,content,"LIVE ACTIVITY — tool calls and results, not private model reasoning",curses.color_pair(1))
             self.safe_add(6,content,"Workspace: "+str(WORKSPACE))
-            for i,line in enumerate(self.activity[-max(1,h-12):]):
+            # Activity is a complete chronological event log. Tool arguments and
+            # results are included here (never private model reasoning).
+            lines = []
+            for item in self.activity:
+                lines.extend(textwrap.wrap(str(item), max(10,w-content-3), replace_whitespace=False) or [""])
+            for item in self.tool_details:
+                lines.append("─ TOOL DETAIL ─")
+                lines.extend(textwrap.wrap(str(item), max(10,w-content-3), replace_whitespace=False) or [""])
+            viewport=max(1,h-12)
+            max_back=max(0,len(lines)-viewport)
+            self.activity_scroll=max(0,min(self.activity_scroll,max_back))
+            end=len(lines)-self.activity_scroll
+            start=max(0,end-viewport)
+            for i,line in enumerate(lines[start:end]):
                 self.safe_add(8+i,content,line)
-            if self.tool_details:
-                self.safe_add(max(8,h-5),content,"LATEST TOOL OUTPUT",curses.color_pair(1)|curses.A_BOLD)
-                detail = self.tool_details[-1]
-                for j,line in enumerate(textwrap.wrap(detail, max(10,w-content-3))[:3]):
-                    self.safe_add(max(9,h-4)+j,content,line)
-            self.safe_add(h-3,content,"Updates and recent tool output. Press 1 for Chat.",curses.A_DIM)
+            if max_back:
+                self.safe_add(6,content,f"Activity log · {len(lines)} lines · {self.activity_scroll} lines back (PgUp/PgDn)",curses.A_DIM)
+            self.safe_add(h-3,content,"Full activity and tool details. Press 1 for Chat.",curses.A_DIM)
         elif self.page=="Skills":
             d=paths.global_skills_dir(); names=sorted(p.name for p in d.iterdir() if p.is_dir()) if d.exists() else []
             self.safe_add(4,content,f"Installed skills: {len(names)}")
@@ -314,7 +324,7 @@ class TUI:
         client=make_client(keys,base,provider)
         if client is None:
             self.messages.append(("assistant","No API key configured. Add one or more keys in Settings.")); return
-        client.timeout=30
+        client.timeout=600
         # Use the same core workspace tools as the desktop agent, not a chat-only stub.
         names={"read_file","write_file","append_file","edit_file","glob_files","grep_files","shell_run","background_shell","web_search","web_fetch","task","task_status"}
         schemas=[x for x in engine.CORE_SCHEMAS if x.get("function",{}).get("name") in names]
@@ -378,8 +388,58 @@ class TUI:
                     self.activity.append("Task stopped by user.")
                     break
                 self.activity.append("Requesting model response…")
-                response=client.chat.completions.create(model=model,messages=history,tools=active_schemas or None,tool_choice=("auto" if active_schemas else "none"))
-                msg=response.choices[0].message
+                # Stream every response so slow/large generations remain visible.
+                # Assemble tool-call deltas before dispatch; partial JSON is never run.
+                self.stream_text = ""
+                self.messages.append(("assistant", ""))
+                stream = client.chat.completions.create(
+                    model=model, messages=history, tools=active_schemas or None,
+                    tool_choice=("auto" if active_schemas else "none"), stream=True,
+                    timeout=600,
+                )
+                content_parts=[]
+                tool_parts={}
+                try:
+                    for chunk in stream:
+                        if self.cancel_event.is_set():
+                            close=getattr(stream,"close",None)
+                            if callable(close): close()
+                            break
+                        choices=getattr(chunk,"choices",[]) or []
+                        if not choices: continue
+                        delta=getattr(choices[0],"delta",None)
+                        if delta is None: continue
+                        piece=getattr(delta,"content",None)
+                        if isinstance(piece,str) and piece:
+                            content_parts.append(piece)
+                            self.stream_text += piece
+                            self.messages[-1] = ("assistant", self.stream_text)
+                        for call in (getattr(delta,"tool_calls",None) or []):
+                            idx=getattr(call,"index",0)
+                            slot=tool_parts.setdefault(idx,{"id":"","name":"","arguments":""})
+                            if getattr(call,"id",None): slot["id"]=call.id
+                            fn=getattr(call,"function",None)
+                            if fn:
+                                if getattr(fn,"name",None): slot["name"] += fn.name
+                                if getattr(fn,"arguments",None): slot["arguments"] += fn.arguments
+                finally:
+                    close=getattr(stream,"close",None)
+                    if callable(close):
+                        try: close()
+                        except Exception: pass
+                if self.cancel_event.is_set():
+                    answer="Task stopped by user."
+                    self.activity.append("Task stopped by user during streaming.")
+                    break
+                from types import SimpleNamespace
+                assembled_calls=[]
+                for idx,slot in sorted(tool_parts.items()):
+                    if not slot["id"]: slot["id"]="call_"+uuid.uuid4().hex
+                    assembled_calls.append(SimpleNamespace(id=slot["id"],function=SimpleNamespace(name=slot["name"],arguments=slot["arguments"])))
+                msg=SimpleNamespace(content="".join(content_parts),tool_calls=assembled_calls)
+                # The streamed assistant placeholder becomes commentary when tools
+                # follow, or the final answer when no tools were requested.
+                self.messages.pop()
                 if self.cancel_event.is_set():
                     answer = "Task stopped by user."
                     self.activity.append("Task stopped by user.")
@@ -439,10 +499,16 @@ class TUI:
                     # Keep full tool data for the model, but show only a compact
                     # outcome in Chat so the final answer remains visible.
                     self.messages.append(("tool", user_result))
-                    self.tool_details.append(f"{name}: {result_text[:1800]}")
-                    self.tool_details = self.tool_details[-30:]
+                    self.tool_details.append(
+                        f"TOOL: {name}\nARGUMENTS: {json.dumps(args, ensure_ascii=False, default=str)}\nRESULT: {result_text[:12000]}"
+                    )
+                    self.tool_details = self.tool_details[-100:]
                     history.append({"role":"tool","tool_call_id":tc.id,"content":result_text[:12000]})
-        except Exception as e: answer=f"Request failed: {e}"
+        except Exception as e:
+            answer=f"Request failed: {type(e).__name__}: {e}"
+            if self.messages and self.messages[-1][0] == "assistant" and not self.messages[-1][1]:
+                self.messages.pop()
+            self.activity.append("Provider request failed: " + answer[:500])
         self.messages.append(("assistant",answer)); self.activity.append("Task finished."); self.activity=self.activity[-200:]; self.notice="Ready"; self.busy=False
 
     def install_podman(self):
@@ -480,6 +546,7 @@ class TUI:
         self.messages.clear()
         self.scroll = 0
         self.tool_details.clear()
+        self.activity_scroll = 0
         self.activity = ["Chat cleared."]
         self.notice = "Chat cleared."
 
@@ -596,10 +663,14 @@ class TUI:
                 self.input += ch
                 continue
             if ch == curses.KEY_PPAGE:
-                self.scroll += max(3, self.s.getmaxyx()[0] // 2)
+                amount=max(3,self.s.getmaxyx()[0]//2)
+                if self.page=="Activity": self.activity_scroll += amount
+                else: self.scroll += amount
                 continue
             if ch == curses.KEY_NPAGE:
-                self.scroll = max(0, self.scroll - max(3, self.s.getmaxyx()[0] // 2))
+                amount=max(3,self.s.getmaxyx()[0]//2)
+                if self.page=="Activity": self.activity_scroll=max(0,self.activity_scroll-amount)
+                else: self.scroll=max(0,self.scroll-amount)
                 continue
             if ch == curses.KEY_HOME and self.page == "Chat":
                 self.scroll = 10**9

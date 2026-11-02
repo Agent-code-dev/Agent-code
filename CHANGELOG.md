@@ -92,3 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 > *Note: For a complete list of all commits and historical release assets, please visit the [GitHub Releases](https://github.com/Agent-code-dev/Agent-code/releases) page.*
+
+## [2.0.1] - 2026-11-02
+
+### Fixed
+- Increased the model response timeout budget to support long-running generations and large file output without treating normal generation latency as a provider failure.
+- Fixed duplicate assistant-message insertion in the desktop agent transcript.
+- TUI now streams assistant text live, assembles streamed tool-call fragments before execution, and closes the stream when the user requests stop.
+- TUI Activity page now retains and displays a much larger chronological event history, including tool arguments and result details, with independent scrolling.
+- TUI reports provider failures with their exception type and removes empty streaming placeholders after failed requests.
+
+### Changed
+- Bumped package version to 2.0.1.

@@ -655,7 +655,7 @@ MAX_LOG_LINES = 900
 MAX_LOG_BATCH = 40
 MAX_RENDERED_RESPONSE_CHARS = 24000
 MAX_USER_MESSAGE_CHARS = 100000
-LLM_TIMEOUT = 120
+LLM_TIMEOUT = 600
 
 PERMISSION_READONLY = "readonly"
 PERMISSION_ASK      = "ask"
@@ -6364,6 +6364,12 @@ class App:
                         self.activity.see("end")
                         self.activity.configure(state="disabled")
                     continue
+                if tag in ("stream_chunk", "stream_end"):
+                    self.log.configure(state="normal")
+                    self.log.insert("end", text if tag == "stream_chunk" else "\n")
+                    self.log.see("end")
+                    self.log.configure(state="disabled")
+                    continue
                 self.log.configure(state="normal")
                 if tag == "agent_md":
                     # Bound markdown parsing/rendering cost for very long answers.
@@ -6827,12 +6833,70 @@ class App:
                                   if self.execution_mode == "build" else
                                   [schema for schema in self.all_schemas
                                    if schema.get("function", {}).get("name") in plan_read_only])
-                resp = self._run_async(self._async_create_completion(
+                # Stream model output into the desktop transcript as it arrives.
+                # Tool calls are accumulated by index and are not dispatched until
+                # the provider has finished sending the complete arguments.
+                stream = self._create_completion_with_retry(
                     purpose="the model response",
                     model=self.model, messages=self.messages,
                     tools=compact_tool_schemas(active_schemas) or None,
                     tool_choice=("auto" if active_schemas else "none"),
-                    temperature=0.2, timeout=LLM_TIMEOUT))
+                    temperature=0.2, timeout=LLM_TIMEOUT, stream=True)
+                content_parts = []
+                tool_parts = {}
+                try:
+                    for chunk in stream:
+                        if self._stop_event.is_set():
+                            close = getattr(stream, "close", None)
+                            if callable(close):
+                                close()
+                            break
+                        choices = getattr(chunk, "choices", None) or []
+                        if not choices:
+                            continue
+                        delta = getattr(choices[0], "delta", None)
+                        if delta is None:
+                            continue
+                        piece = getattr(delta, "content", None)
+                        if isinstance(piece, str) and piece:
+                            content_parts.append(piece)
+                            self.log_line(piece, "stream_chunk")
+                        for call in (getattr(delta, "tool_calls", None) or []):
+                            index = getattr(call, "index", 0)
+                            slot = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                            if getattr(call, "id", None):
+                                slot["id"] = call.id
+                            function = getattr(call, "function", None)
+                            if function is not None:
+                                if getattr(function, "name", None):
+                                    slot["name"] += function.name
+                                if getattr(function, "arguments", None):
+                                    slot["arguments"] += function.arguments
+                finally:
+                    close = getattr(stream, "close", None)
+                    if callable(close):
+                        try:
+                            close()
+                        except Exception:
+                            pass
+                if self._stop_event.is_set():
+                    self.log_line("[stopped during response streaming]", "error")
+                    self._stopped_last = True
+                    self._can_continue = True
+                    self._last_run_status = "stopped"
+                    return
+                from types import SimpleNamespace
+                assembled_calls = []
+                for index, slot in sorted(tool_parts.items()):
+                    if not slot["id"]:
+                        slot["id"] = "call_" + uuid.uuid4().hex
+                    assembled_calls.append(SimpleNamespace(
+                        id=slot["id"],
+                        function=SimpleNamespace(name=slot["name"], arguments=slot["arguments"])))
+                if content_parts:
+                    self.log_line("", "stream_end")
+                msg = SimpleNamespace(content="".join(content_parts), tool_calls=assembled_calls)
+                resp = SimpleNamespace(choices=[SimpleNamespace(message=msg)])
             except Exception as e:
                 raw_error = f"{type(e).__name__}: {e}"
                 import re
@@ -6869,7 +6933,9 @@ class App:
                 if self._last_agent_answer.lower() in {"(done)", "done", "(completed)", "completed"}:
                     self.log_line("Done.", "dim")
                 elif self._last_agent_answer:
-                    self.log_line(self._last_agent_answer, "agent_md")
+                    # The response has already been appended incrementally through
+                    # stream_chunk events; do not print it a second time.
+                    pass
                 else:
                     self.log_line("Done.", "dim")
                 self._can_continue = False
