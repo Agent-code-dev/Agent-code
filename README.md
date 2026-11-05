@@ -1,6 +1,6 @@
 <p align="center">
   <img src="src/agent_code/data/icons/agent-code.png" width="145" alt="Agent Code Logo">
-</p><h1 align="center">Agent Code 2.0</h1><h3 align="center">⚡ Your AI coding agent. Your tools. Your environment.</h3><p align="center">
+</p><h1 align="center">Agent Code 2.1</h1><h3 align="center">⚡ Your AI coding agent. Your tools. Your environment.</h3><p align="center">
   An open-source, extensible AI coding agent built with Python and CustomTkinter.
   <br>
   Build, modify, debug, and manage projects using AI — with customizable Skills, application Add-ons, and MCP integrations.
@@ -997,7 +997,7 @@ See:
 
 <p align="center">
   <img src="src/agent_code/data/icons/agent-code.png" width="65" alt="Agent Code">
-</p><h2 align="center">⚡ Agent Code 2.0</h2><p align="center">
+</p><h2 align="center">⚡ Agent Code 2.1</h2><p align="center">
   <b>Your AI coding agent. Your tools. Your environment.</b>
   <br><br>
   <a href="https://github.com/agent-code-dev/agent-code">GitHub</a>

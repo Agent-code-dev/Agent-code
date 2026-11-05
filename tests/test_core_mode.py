@@ -47,4 +47,4 @@ def test_regular_agent_mode_keeps_its_extended_toolset():
     src = AGENT.read_text(encoding="utf-8")
     assert '"background_shell": self._guarded_background_shell' in src
     assert 'self._build_mcp_tools(self.all_schemas, self.all_callables)' in src
-    assert 'load_skills(SKILLS_DIR, self.disabled_skills)' in src
+    assert 'load_skills(SKILLS_DIR, self.disabled_skills,' in src

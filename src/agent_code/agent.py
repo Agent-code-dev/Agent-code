@@ -36,11 +36,20 @@ import urllib.error
 import urllib.request
 import importlib.util
 import mimetypes
+import zipfile
+import io
 from html.parser import HTMLParser
 from pathlib import Path
 
 from .advanced_features import CheckpointStore, analyze_project, render_project_summary, run_validation, build_task_report, format_task_report
 from .projects import create_project_directory
+from .tool_namespace import make_tool_name, UnifiedToolNamespace
+from .runtime import (AgentLoopGuard, ProgressTracker, HookBus, PermissionEngine,
+                      SkillExecutionRouter, PlanningEngine, VerificationEngine,
+                      skill_execution_target)
+from .provider_compat import (_provider_metadata, _tool_call_history_item,
+                              _stream_tool_call_index,
+                              _has_missing_gemini_tool_signature)
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -1409,6 +1418,10 @@ def _podman_start() -> str:
     # in the container layer. Podman resolves the host path on Windows/macOS/Linux.
     host_workspace = str(WORKSPACE.resolve())
     volume = f"{host_workspace}:/workspace:rw"
+    # Skills may explicitly request Podman execution. Expose their installed
+    # source tree read-only; never give the container write access to installed
+    # Skill code or the user's home directory.
+    skills_volume = f"{str(paths.global_skills_dir().resolve())}:/agent-code-skills:ro"
     # Explicit bridge networking enables outbound internet/DNS on supported
     # Podman engines. Pin apk repositories to the matching Alpine release
     # instead of relying on mirror entries baked into an image layer.
@@ -1430,7 +1443,8 @@ def _podman_start() -> str:
     args = ["create", "--name", name, "--user", "0:0", "--network", "bridge",
             "--security-opt", "no-new-privileges",
             "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE", "--cap-add", "FOWNER", "--cap-add", "SETGID", "--cap-add", "SETUID", "--pids-limit", "256", "--memory", "2g",
-            "--volume", volume, "--workdir", "/workspace", "--pull=never", image,
+            "--volume", volume, "--volume", skills_volume,
+            "--workdir", "/workspace", "--pull=never", image,
             "sh", "-lc", bootstrap]
     r = _podman_run(args, timeout=240)
     if r.returncode:
@@ -3947,7 +3961,9 @@ class MCPManagerDialog(ctk.CTkFrame):
             buttons = ctk.CTkFrame(row, fg_color="transparent")
             buttons.pack(side="right", padx=8, pady=8)
             if server.get("enabled", True):
-                ctk.CTkButton(buttons, text="Disconnect" if server["id"] in connected else "Connect",
+                connected = bool(self.app.mcp_manager and
+                                 self.app.mcp_manager.is_connected(server["id"]))
+                ctk.CTkButton(buttons, text="Disconnect" if connected else "Connect",
                               width=92, height=30, command=lambda s=server: self._toggle_connection(s)).pack(pady=2)
                 ctk.CTkButton(buttons, text="Disable", width=92, height=28, fg_color=BG_HOVER,
                               command=lambda s=server: self._enable(s, False)).pack(pady=2)
@@ -4119,6 +4135,21 @@ class App:
         self._subagent_jobs = {}
         self._subagent_jobs_lock = threading.RLock()
         self._subagent_counter = itertools.count(1)
+        self._loop_guard = AgentLoopGuard(max_identical_calls=2, max_similar_searches=3, workspace=WORKSPACE)
+        self._progress_tracker = ProgressTracker()
+        self._hook_bus = HookBus()
+        self._permission_engine = PermissionEngine()
+        self._planning_engine = PlanningEngine()
+        self._verification_engine = VerificationEngine(max_attempts=self.max_repair_attempts + 1)
+        self._skill_execution_router = SkillExecutionRouter({
+            "sandbox": self._execute_skill_in_sandbox,
+            "ssh": self._execute_skill_over_ssh,
+        })
+        self._tool_original_names = {}
+        self._tool_source_types = {}
+        self._tool_execution_targets = {}
+        self._delegation_required = False
+        self._delegation_jobs_for_task = set()
         # Embedded pages share the main window. Keep exactly one active page
         # so rapid navigation cannot leave overlapping frames behind.
         self._active_page = None
@@ -4659,6 +4690,7 @@ class App:
         self._validation_attempts += 1
         result = run_validation(argv, WORKSPACE, timeout=90)
         self._last_validation_result = result
+        self._verification_engine.record(result)
         return "VALIDATION RESULT\n" + json.dumps(result, ensure_ascii=False, indent=2)[:8000]
 
     def _project_summary(self):
@@ -4779,18 +4811,23 @@ class App:
 
     def _central_tool_permission(self, name, args):
         """Enforce mode and permission policy before any core/Skill/MCP tool runs."""
-        read_only = {"read_file", "glob_files", "grep_files", "todo_read", "web_search", "web_fetch", "project_context", "review_changes", "finish_plan"}
-        if self.execution_mode == "plan" and name not in read_only:
+        original = getattr(self, "_tool_original_names", {}).get(name, name)
+        read_only = PermissionEngine.READ_ONLY | {"review_changes"}
+        if self.execution_mode == "plan" and original not in read_only:
             return "DENIED: Plan Mode is read-only. Present the plan and ask the user to switch to Build Mode before changing files or running tools that may change state."
-        if name in read_only or name == "task_status":
+        if original in read_only or original == "task_status":
             return None
-        core_stateful = {"write_file", "append_file", "edit_file", "shell_run", "background_shell", "remote_shell", "todo_write", "task", "validate_project"}
+        core_stateful = PermissionEngine.STATEFUL | {"remote_shell"}
         # MCP and extension tools are not implicitly trusted, even in Auto Mode.
-        must_confirm = name.startswith("mcp_") or name not in core_stateful | read_only
+        must_confirm = (self._permission_engine.classify(name) == "extension"
+                        or original not in core_stateful | read_only)
         # Core file/shell wrappers already enforce their own confirmation policy.
         # Validate commands always get a dedicated confirmation, including Auto Mode.
-        if must_confirm or name == "validate_project":
-            if not self._ask_permission("Tool permission", f"Tool: {name}\nArguments: {json.dumps(args, ensure_ascii=False, default=str)[:500]}"):
+        if must_confirm or original == "validate_project":
+            source = getattr(self, "_tool_source_types", {}).get(name, "core")
+            target = getattr(self, "_tool_execution_targets", {}).get(name)
+            environment = f"\nExecution environment: {target}" if target else ""
+            if not self._ask_permission("Tool permission", f"Tool: {name}\nSource: {source}{environment}\nArguments: {json.dumps(args, ensure_ascii=False, default=str)[:500]}"):
                 return "DENIED by user"
         if self.permission == PERMISSION_READONLY:
             return "DENIED: read-only permission profile is active"
@@ -5326,6 +5363,125 @@ class App:
             return self.mcp_manager.call_tool(server_id, original_name, kwargs)
         return dispatch
 
+    def _execute_skill_in_sandbox(self, handler, arguments, context):
+        """Execute the Skill's declared callable inside the managed Alpine container."""
+        if _podman_state() != "running":
+            raise RuntimeError("This Skill requires the Podman sandbox, but the sandbox is not running. Start it in Settings → Sandbox; the Skill was not run on the host.")
+        skill_name = str(context.get("skill_name") or "")
+        tool_name = str(context.get("tool_name") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", skill_name) or not tool_name:
+            raise RuntimeError("Invalid Skill execution identity; refusing sandbox dispatch.")
+        mounted = _podman_run(["exec", _podman_container_name(), "test", "-f",
+                               f"/agent-code-skills/{skill_name}/skill.py"], timeout=10)
+        if mounted.returncode:
+            raise RuntimeError("The running Podman sandbox predates Skill source mounting. Stop and remove the existing sandbox, then start it again from Settings → Sandbox.")
+        payload = {"skill": skill_name, "tool": tool_name, "arguments": arguments}
+        encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False, default=str).encode()).decode("ascii")
+        script = (
+            "import base64,importlib.util,json,sys,traceback; "
+            "from pathlib import Path; "
+            "p=json.loads(base64.b64decode(sys.argv[1])); "
+            "d=Path('/agent-code-skills')/p['skill']; "
+            "sys.path.insert(0,str(d)); "
+            "s=importlib.util.spec_from_file_location('agent_code_skill_runtime',d/'skill.py'); "
+            "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+            "f=(getattr(m,'TOOL_CALLABLES',{}) or {}).get(p['tool']); "
+            "assert callable(f),'Skill callable not found'; "
+            "r=f(**p['arguments']); "
+            "print(json.dumps({'ok':True,'result':r},ensure_ascii=False,default=str))"
+        )
+        result = _podman_run(["exec", "--workdir", "/workspace", _podman_container_name(),
+                              "python3", "-c", script, encoded], timeout=90)
+        output = (result.stdout or "").strip()
+        if result.returncode:
+            detail = (result.stderr or output or f"exit status {result.returncode}").strip()
+            raise RuntimeError("Podman Skill execution failed: " + detail[-1200:])
+        try:
+            response = json.loads(output.splitlines()[-1])
+        except (ValueError, IndexError):
+            raise RuntimeError("Podman Skill runner returned an invalid response: " + output[-800:]) from None
+        if not response.get("ok"):
+            raise RuntimeError(str(response.get("error") or "Podman Skill execution failed"))
+        return response.get("result")
+
+    def _execute_skill_over_ssh(self, handler, arguments, context):
+        """Transfer a bounded Skill snapshot to the linked SSH host and execute it there."""
+        client = getattr(self, "ssh_client", None)
+        if client is None or not client.get_transport() or not client.get_transport().is_active():
+            raise RuntimeError("This Skill requires an active SSH connection. No host fallback was attempted.")
+        skill_path = Path(str(context.get("skill_path") or "")).resolve()
+        skills_root = Path(SKILLS_DIR).resolve()
+        if not skill_path.is_relative_to(skills_root) or not (skill_path / "skill.py").is_file():
+            raise RuntimeError("Skill source is outside the installed Skills directory; refusing remote execution.")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for item in skill_path.rglob("*"):
+                if item.is_file() and not item.is_symlink():
+                    rel = item.relative_to(skill_path)
+                    if any(part in {"__pycache__", ".git", ".venv", "venv"} for part in rel.parts):
+                        continue
+                    archive.write(item, str(Path(skill_path.name) / rel))
+        archive_bytes = buffer.getvalue()
+        if len(archive_bytes) > 8 * 1024 * 1024:
+            raise RuntimeError("Skill package exceeds the 8 MiB SSH execution limit.")
+        payload = {"skill": skill_path.name, "tool": str(context.get("tool_name") or ""),
+                   "arguments": arguments,
+                   "workspace": str(context.get("ssh_workspace") or "")}
+        encoded_payload = base64.b64encode(json.dumps(payload, ensure_ascii=False, default=str).encode()).decode("ascii")
+        script = (
+            "import importlib.util,json,os,sys,tempfile,zipfile; from pathlib import Path; "
+            "p=json.loads(__import__('base64').b64decode(sys.argv[2])); "
+            "z=Path(sys.argv[1]); t=tempfile.TemporaryDirectory(prefix='agent-code-skill-'); "
+            "zipfile.ZipFile(z).extractall(t.name); d=Path(t.name)/p['skill']; "
+            "sys.path.insert(0,str(d)); os.chdir(p['workspace'] or os.getcwd()); "
+            "s=importlib.util.spec_from_file_location('agent_code_skill_runtime',d/'skill.py'); "
+            "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+            "f=(getattr(m,'TOOL_CALLABLES',{}) or {}).get(p['tool']); "
+            "assert callable(f),'Skill callable not found'; r=f(**p['arguments']); "
+            "print(json.dumps({'ok':True,'result':r},ensure_ascii=False,default=str)); t.cleanup()"
+        )
+        remote_dir = ""
+        sftp = None
+        remote_zip = ""
+        try:
+            _stdin, stdout, stderr = client.exec_command("mktemp -d /tmp/agent-code-skill.XXXXXX", timeout=15, get_pty=False)
+            remote_dir = stdout.read(2048).decode("utf-8", errors="replace").strip()
+            status = stdout.channel.recv_exit_status()
+            if status or not remote_dir.startswith("/tmp/agent-code-skill."):
+                detail = stderr.read(2048).decode("utf-8", errors="replace").strip()
+                raise RuntimeError("Could not create remote temporary Skill directory: " + (detail or remote_dir))
+            remote_zip = remote_dir + "/skill.zip"
+            sftp = client.open_sftp()
+            with sftp.file(remote_zip, "wb") as remote_file:
+                remote_file.write(archive_bytes)
+            command = "python3 -c " + shlex.quote(script) + " " + shlex.quote(remote_zip) + " " + shlex.quote(encoded_payload)
+            _stdin, stdout, stderr = client.exec_command(command, timeout=120, get_pty=False)
+            output = stdout.read(24000).decode("utf-8", errors="replace").strip()
+            error = stderr.read(8000).decode("utf-8", errors="replace").strip()
+            status = stdout.channel.recv_exit_status()
+            if status:
+                raise RuntimeError("SSH Skill execution failed: " + (error or output or f"exit status {status}")[-1200:])
+            try:
+                response = json.loads(output.splitlines()[-1])
+            except (ValueError, IndexError):
+                raise RuntimeError("SSH Skill runner returned an invalid response: " + output[-800:]) from None
+            if not response.get("ok"):
+                raise RuntimeError(str(response.get("error") or "SSH Skill execution failed"))
+            return response.get("result")
+        finally:
+            if sftp is not None:
+                try:
+                    if remote_zip:
+                        sftp.remove(remote_zip)
+                    if remote_dir:
+                        sftp.rmdir(remote_dir)
+                except Exception:
+                    pass
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
+
     def _open_mcp_manager(self):
         self._open_settings()
         page = getattr(self, "_active_page", None)
@@ -5338,6 +5494,7 @@ class App:
     # ---- toolset ----
 
     def _build_toolset(self):
+        self._tool_execution_targets = {}
         self.all_schemas = [schema for schema in CORE_SCHEMAS if schema.get("function", {}).get("name") != "remote_shell"]
         self.all_callables = {
             "create_project": self._guarded_create_project,
@@ -5383,9 +5540,34 @@ class App:
             self.system_prompt = CORE_MINI_PROMPT
         else:
             skill_schemas, skill_callables, skill_meta, skill_commands = \
-                load_skills(SKILLS_DIR, self.disabled_skills)
+                load_skills(SKILLS_DIR, self.disabled_skills,
+                            default_target=load_agent_config().get("skill_execution_default_target", "host"))
             self.all_schemas.extend(skill_schemas)
-            self.all_callables.update(skill_callables)
+            for meta in skill_meta:
+                skill_name = str(meta.get("_folder_name") or meta.get("name") or "")
+                for provider_name, original_name in (meta.get("_tool_names", {}) or {}).items():
+                    handler = skill_callables.get(provider_name)
+                    if not callable(handler):
+                        continue
+                    def make_skill_dispatch(_handler, _meta, _skill_name, _original_name, _provider_name):
+                        def dispatch(**kwargs):
+                            target = skill_execution_target(_meta, _original_name)
+                            context = {
+                                "skill_name": _skill_name,
+                                "tool_name": _original_name,
+                                "skill_path": str(Path(SKILLS_DIR) / _skill_name),
+                                "workspace": str(WORKSPACE),
+                                "ssh_workspace": (_meta.get("execution", {}) or {}).get("ssh_workspace", "")
+                                    if isinstance(_meta.get("execution", {}), dict) else "",
+                                "allowed_targets": (_meta.get("execution", {}) or {}).get("allowed")
+                                    if isinstance(_meta.get("execution", {}), dict) else None,
+                                "default_target": load_agent_config().get("skill_execution_default_target", "host"),
+                            }
+                            return self._skill_execution_router.execute(
+                                target=target, handler=_handler, args=kwargs, context=context)
+                        return dispatch
+                    self.all_callables[provider_name] = make_skill_dispatch(
+                        handler, dict(meta), skill_name, original_name, provider_name)
             self.skill_names = [m.get("name", "?") for m in skill_meta]
             self.skill_meta = skill_meta
             self.skill_commands = skill_commands
@@ -5417,6 +5599,72 @@ class App:
                 prompt += "\n\n# Active Agent Code add-ons\n" + "\n".join(
                     f"- {api.addon_name}" for api in self.addon_manager.apis)
             self.system_prompt = prompt
+
+        # Final, global registration boundary. No provider receives a schema
+        # directly from Core, a Skill, MCP, or an Add-on: every tool is checked
+        # and recorded here first.
+        core_names = {schema.get("function", {}).get("name") for schema in CORE_SCHEMAS}
+        skill_identities = {}
+        for meta in getattr(self, "skill_meta", []):
+            skill_identities.update(meta.get("_tool_names", {}))
+        addon_identities = getattr(getattr(self, "addon_manager", None), "tool_identities", {})
+        mcp_identities = getattr(self, "_mcp_tool_map", {})
+        registry = UnifiedToolNamespace()
+        for schema in list(self.all_schemas):
+            original_provider_name = schema.get("function", {}).get("name")
+            if not original_provider_name:
+                continue
+            handler = self.all_callables.get(original_provider_name)
+            if not callable(handler):
+                self.log_line(f"[tools] skipped schema without callable: {original_provider_name}", "dim")
+                continue
+            if original_provider_name in core_names:
+                namespace, source_type, original = "core", "core", original_provider_name
+                provider_name = make_tool_name(namespace, original)
+            elif original_provider_name in addon_identities:
+                identity = addon_identities[original_provider_name]
+                namespace = identity.get("namespace", "addon")
+                source_type = "addon"
+                original = identity.get("original_name", original_provider_name)
+                provider_name = original_provider_name
+            elif original_provider_name in skill_identities:
+                namespace = next((m.get("_folder_name", m.get("name", "skill")) for m in self.skill_meta
+                                  if original_provider_name in m.get("_tool_names", {})), "skill")
+                source_type, original = "skill", skill_identities[original_provider_name]
+                provider_name = original_provider_name
+            elif original_provider_name in mcp_identities:
+                server_id, original = mcp_identities[original_provider_name]
+                namespace, source_type = "mcp_" + str(server_id), "mcp"
+                provider_name = original_provider_name
+            else:
+                namespace, source_type, original = "system", "system", original_provider_name
+                provider_name = make_tool_name(namespace, original)
+            try:
+                registry.register_named(provider_name, namespace, source_type,
+                                        original, schema, handler)
+            except (TypeError, ValueError) as exc:
+                self.log_line(f"[tools] rejected {original_provider_name}: {exc}", "error")
+        self.all_schemas = registry.schemas
+        self.all_callables = registry.callables
+        self._tool_identities = registry.identities
+        self._tool_original_names = {name: identity.original_name
+                                     for name, identity in registry.identities.items()}
+        self._tool_source_types = {name: identity.source_type
+                                   for name, identity in registry.identities.items()}
+        for name, identity in registry.identities.items():
+            if identity.source_type == "skill":
+                meta = next((item for item in self.skill_meta
+                             if item.get("_folder_name", item.get("name")) == identity.namespace), {})
+                try:
+                    self._tool_execution_targets[name] = skill_execution_target(meta, identity.original_name)
+                except ValueError:
+                    self._tool_execution_targets[name] = "invalid metadata"
+        self._hook_bus = HookBus()
+        if not getattr(self, "core_mode", False):
+            for api in getattr(self.addon_manager, "apis", []):
+                for event, callbacks in api.hooks.items():
+                    for callback in callbacks:
+                        self._hook_bus.register(event, callback)
 
     def _reload_tools(self):
         """Reload skills safely; never mutate tool schemas during an agent turn."""
@@ -5523,12 +5771,13 @@ class App:
     def _checkpoint_before_path(self, raw_path):
         """Capture only the specific project file before an agent file-write tool touches it."""
         checkpoint = getattr(self, "_task_checkpoint", None)
-        if not checkpoint or not raw_path:
+        if not raw_path:
             return
         try:
             target = _safe_path(str(raw_path))
             rel = target.resolve().relative_to(self.checkpoints.workspace).as_posix()
-            if not self.checkpoints.capture_before(checkpoint["id"], rel):
+            self._task_changed_paths.add(rel)
+            if checkpoint and not self.checkpoints.capture_before(checkpoint["id"], rel):
                 self.log_line(f"[checkpoint] skipped oversized or restricted file: {rel}", "dim")
         except Exception as exc:
             self.log_line(f"[checkpoint] could not capture target file: {exc}", "error")
@@ -5538,7 +5787,10 @@ class App:
             return "DENIED: read-only mode is on; switch to Build Mode to create a project."
         if not self._ask_permission("Create new project", f"Create a fresh project folder named {name!r} inside:\n{WORKSPACE}"):
             return "DENIED by user"
-        return tool_create_project(name, description)
+        result = tool_create_project(name, description)
+        if not str(result).startswith(("ERROR", "DENIED")):
+            self._task_changed_paths.add(str(name))
+        return result
 
     def _guarded(self, fn):
         def wrapper(*a, **kw):
@@ -5625,11 +5877,17 @@ class App:
         """Launch a coding-capable subagent and return immediately with its job ID."""
         if self.execution_mode != "build":
             return "DENIED: subagents that can modify files are available only in Build Mode."
+        with self._subagent_jobs_lock:
+            active = sum(1 for item in self._subagent_jobs.values()
+                         if item.get("status") == "running")
+            if active >= 4:
+                return "SUBAGENT_LIMIT: four subagents are already running; collect a result before launching another."
         job_id = f"subagent-{next(self._subagent_counter)}-{secrets.token_hex(3)}"
         job = {"id": job_id, "description": str(description)[:240],
                "status": "running", "result": "", "started_at": time.time()}
         with self._subagent_jobs_lock:
             self._subagent_jobs[job_id] = job
+            self._delegation_jobs_for_task.add(job_id)
         worker = threading.Thread(
             target=self._execute_subagent_job,
             args=(job_id, str(description), str(prompt)),
@@ -5656,7 +5914,8 @@ class App:
         allowed = {"read_file", "write_file", "append_file", "edit_file",
                    "glob_files", "grep_files", "web_search", "web_fetch", "project_context"}
         sub_schemas = [x for x in self.all_schemas
-                       if x.get("function", {}).get("name") in allowed]
+                       if self._tool_original_names.get(x.get("function", {}).get("name"),
+                                                        x.get("function", {}).get("name")) in allowed]
         sub_messages = [
             {"role": "system", "content":
              f"You are an independent coding subagent. Job: {description}.\n"
@@ -5666,6 +5925,9 @@ class App:
              f"Workspace: {WORKSPACE}"},
             {"role": "user", "content": prompt},
         ]
+        sub_guard = AgentLoopGuard(max_identical_calls=2, max_similar_searches=3,
+                                   workspace=WORKSPACE)
+        sub_tool_calls = 0
         try:
             # Like the main agent, the subagent has no fixed tool-round cap.
             # User cancellation and provider/network failures remain the stop paths.
@@ -5677,11 +5939,8 @@ class App:
                 msg = resp.choices[0].message
                 assistant = {"role": "assistant", "content": msg.content or ""}
                 if msg.tool_calls:
-                    assistant["tool_calls"] = [
-                        {"id": tc.id, "type": "function",
-                         "function": {"name": tc.function.name,
-                                      "arguments": tc.function.arguments}}
-                        for tc in msg.tool_calls]
+                    assistant["tool_calls"] = [_tool_call_history_item(tc) for tc in msg.tool_calls]
+                assistant.update(_provider_metadata(msg))
                 sub_messages.append(assistant)
                 if not msg.tool_calls:
                     result = msg.content or "(subagent returned nothing)"
@@ -5689,20 +5948,33 @@ class App:
                         self._subagent_jobs[job_id].update(status="completed", result=result)
                     return
                 for tc in msg.tool_calls:
+                    sub_tool_calls += 1
                     name = tc.function.name
                     try:
                         args = json.loads(tc.function.arguments or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    if name not in allowed:
+                    original = self._tool_original_names.get(name, name)
+                    if original not in allowed:
                         result = f"DENIED: {name} is not available to subagents."
                     else:
+                        loop_block = sub_guard.before_call(original, args)
+                        cached = None if loop_block else sub_guard.cached_read(original, args)
                         denied = self._central_tool_permission(name, args)
                         fn = self.all_callables.get(name)
                         try:
-                            result = denied if denied else (fn(**args) if fn else f"unknown tool: {name}")
+                            result = (denied if denied else loop_block if loop_block else
+                                      cached if cached is not None else
+                                      (fn(**args) if fn else f"unknown tool: {name}"))
                         except Exception as exc:
                             result = f"ERROR: {type(exc).__name__}: {exc}"
+                        finally:
+                            sub_guard.after_call(original, args, locals().get("result", ""))
+                    if sub_tool_calls >= 80:
+                        result = str(result) + "\nSUBAGENT_LIMIT: 80 tool calls reached; stop and report verified progress."
+                        with self._subagent_jobs_lock:
+                            self._subagent_jobs[job_id].update(status="completed", result=result)
+                        return
                     sub_messages.append({"role": "tool", "tool_call_id": tc.id,
                                          "content": sanitize_tool_result_for_context(result, 4000)})
         except Exception as exc:
@@ -6566,8 +6838,6 @@ class App:
 
     def _run_agent(self, task):
         self._current_task = str(task)
-        if not getattr(self, "core_mode", False):
-            self.addon_manager.emit("task_started", app=self, task=str(task))
         # Reset per-task label history so labels remain varied within this run.
         self._recent_activity_labels = []
         try:
@@ -6576,11 +6846,17 @@ class App:
             self._can_continue = True
             self._stopped_last = True
             self._last_run_status = "error"
+            try:
+                self._hook_bus.emit("agent_error", app=self, task=str(task), error=exc)
+            except Exception:
+                pass
             self.log_line(f"AGENT ERROR: {type(exc).__name__}: {exc}", "error")
         finally:
-            if not getattr(self, "core_mode", False):
-                self.addon_manager.emit("task_finished", app=self, task=str(task),
-                    status=getattr(self, "_last_run_status", "unknown"))
+            try:
+                self._hook_bus.emit("task_finished", app=self, task=str(task),
+                                    status=getattr(self, "_last_run_status", "unknown"))
+            except Exception as hook_exc:
+                self.log_line(f"[hooks] task_finished hook failed: {hook_exc}", "dim")
             if getattr(self, "_task_checkpoint", None):
                 checkpoint = self._task_checkpoint
                 try:
@@ -6616,6 +6892,7 @@ class App:
         Use one small label-only request per action to limit token overhead.
         Duplicate/generic outputs fall back locally rather than triggering another call.
         """
+        tool_name = getattr(self, "_tool_original_names", {}).get(tool_name, tool_name)
         fallback = describe_activity(tool_name, args)
         if getattr(self, "core_mode", False):
             return fallback
@@ -6767,6 +7044,20 @@ class App:
 
     def _agent_loop(self, task):
         if task is not None:
+            self._loop_guard.reset()
+            self._progress_tracker.reset(str(task))
+            self._delegation_jobs_for_task = set()
+            self._delegation_required = self.execution_mode == "build" and bool(re.search(
+                r"\b(use|with|via|through|delegate to)\b.{0,30}\b(sub.?agents?|parallel agents?)\b|\b(sub.?agents?)\b.{0,30}\b(required|must|please use)\b",
+                str(task), re.I))
+            self._delegation_prompted = False
+            self._auto_verification_attempted = False
+            self._task_changed_paths = set()
+            self._verification_engine.reset()
+            try:
+                self._hook_bus.emit("task_started", app=self, task=str(task))
+            except Exception as exc:
+                self.log_line(f"[hooks] task_started hook failed: {exc}", "dim")
             # Drop per-task project/mode system notes from older turns and keep a
             # small number of recent complete turns. This avoids resending a huge
             # accumulated tool transcript on every new user message.
@@ -6791,6 +7082,16 @@ class App:
             if len(self.messages) > 60:
                 self.messages = [self.messages[0]] + self.messages[-50:]
 
+        if "gemini-3" in self.model.lower() and _has_missing_gemini_tool_signature(self.messages):
+            self.log_line(
+                "This chat contains an older tool call without Gemini 3's required thought signature. "
+                "That signature cannot be reconstructed; start a new chat and resend the task.",
+                "error")
+            self._can_continue = False
+            self._stopped_last = True
+            self._last_run_status = "error"
+            return
+
         if self.client is None:
             self.log_line("No API key configured. Open Settings & accounts to configure a provider.", "error")
             self._can_continue = bool(self.messages and self.messages[-1].get("role") == "user")
@@ -6804,11 +7105,18 @@ class App:
             if not getattr(self, "core_mode", False):
                 summary = self._project_summary()
                 mode_note = ("PLAN: read-only inspection; do not write or run state-changing commands. For substantive tasks, call finish_plan only when the actionable plan is complete.\n" if self.execution_mode == "plan" else "BUILD: implement the approved task and validate it.\n")
+                mode_note += self._planning_engine.directive(
+                    str(task), delegation_required=self._delegation_required) + "\n"
+                if self._delegation_required:
+                    mode_note += ("DELEGATION REQUIREMENT: The user explicitly requested subagents. "
+                                  "Before implementing, launch at least one focused task subagent for an "
+                                  "independent part of the work. Do not merely mention subagents; actually "
+                                  "call the task tool, collect its result with task_status, and integrate it.\n")
                 self.messages.append({"role": "system", "content": "Execution mode: " + self.execution_mode.upper() + ". " + mode_note + "Project summary: " + summary[:1200]})
             if self.execution_mode == "build":
+                self._task_changed_paths = set()
                 try:
                     self._task_checkpoint = self.checkpoints.create("task: " + str(task)[:100])
-                    self._task_changed_paths = set()
                     self.log_line(f"[checkpoint] started {self._task_checkpoint['id']} (files are captured only when the agent edits them)", "dim")
                 except Exception as exc:
                     self.log_line(f"[checkpoint] could not create recovery point: {exc}", "error")
@@ -6827,12 +7135,12 @@ class App:
                 # Enforce Plan Mode at the API boundary as well as in the central
                 # tool-permission guard. Models cannot even see write/shell/extension
                 # tools while planning, so they cannot skip planning by calling them.
-                plan_read_only = {"read_file", "glob_files", "grep_files", "todo_read", "web_search", "web_fetch", "project_context", "review_changes", "finish_plan"}
+                plan_read_only = PermissionEngine.READ_ONLY | {"review_changes"}
                 active_schemas = ([schema for schema in self.all_schemas
-                                   if schema.get("function", {}).get("name") != "finish_plan"]
+                                   if self._tool_original_names.get(schema.get("function", {}).get("name"), schema.get("function", {}).get("name")) != "finish_plan"]
                                   if self.execution_mode == "build" else
                                   [schema for schema in self.all_schemas
-                                   if schema.get("function", {}).get("name") in plan_read_only])
+                                   if self._tool_original_names.get(schema.get("function", {}).get("name"), schema.get("function", {}).get("name")) in plan_read_only])
                 # Stream model output into the desktop transcript as it arrives.
                 # Tool calls are accumulated by index and are not dispatched until
                 # the provider has finished sending the complete arguments.
@@ -6862,10 +7170,11 @@ class App:
                             content_parts.append(piece)
                             self.log_line(piece, "stream_chunk")
                         for call in (getattr(delta, "tool_calls", None) or []):
-                            index = getattr(call, "index", 0)
-                            slot = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                            index = _stream_tool_call_index(call, tool_parts)
+                            slot = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": "", "metadata": {}})
                             if getattr(call, "id", None):
                                 slot["id"] = call.id
+                            slot["metadata"].update(_provider_metadata(call))
                             function = getattr(call, "function", None)
                             if function is not None:
                                 if getattr(function, "name", None):
@@ -6891,7 +7200,7 @@ class App:
                     if not slot["id"]:
                         slot["id"] = "call_" + uuid.uuid4().hex
                     assembled_calls.append(SimpleNamespace(
-                        id=slot["id"],
+                        id=slot["id"], type="function", extra_content=slot["metadata"].get("extra_content"),
                         function=SimpleNamespace(name=slot["name"], arguments=slot["arguments"])))
                 if content_parts:
                     self.log_line("", "stream_end")
@@ -6899,10 +7208,18 @@ class App:
                 resp = SimpleNamespace(choices=[SimpleNamespace(message=msg)])
             except Exception as e:
                 raw_error = f"{type(e).__name__}: {e}"
-                import re
+                # `re` is imported at module scope. Importing it here would make
+                # it a local variable throughout _agent_loop, causing an
+                # UnboundLocalError when delegation detection uses re.search.
                 status_match = re.search(r"(?:Error code:|status(?:_code)?[ =:]+)(\d{3})", raw_error, re.I)
                 status = status_match.group(1) if status_match else "provider"
                 self.log_line(f"Model request failed after retry attempts ({status}). Open Show activity for details.", "error")
+                if "thought_signature" in raw_error.lower():
+                    self.log_line(
+                        "Gemini rejected tool-call metadata. Agent Code now preserves Gemini thought signatures; "
+                        "if this persists, check whether a custom proxy strips extra_content.google.thought_signature. "
+                        "For a chat created before this fix, start a new chat because the old signature cannot be recovered.",
+                        "error")
                 self.log_line(f"MODEL ERROR DETAIL\n{raw_error[:4000]}", "detail")
                 self._can_continue = True
                 self._stopped_last = True
@@ -6920,16 +7237,57 @@ class App:
 
             assistant = {"role": "assistant", "content": msg.content or ""}
             if msg.tool_calls:
-                assistant["tool_calls"] = [
-                    {"id": tc.id, "type": "function",
-                     "function": {"name": tc.function.name,
-                                  "arguments": tc.function.arguments}}
-                    for tc in msg.tool_calls
-                ]
+                assistant["tool_calls"] = [_tool_call_history_item(tc) for tc in msg.tool_calls]
+            assistant.update(_provider_metadata(msg))
             self.messages.append(assistant)
 
             if not msg.tool_calls:
                 self._last_agent_answer = (msg.content or "").strip()
+                if self._delegation_required:
+                    job_ids = list(self._delegation_jobs_for_task)
+                    if not job_ids and not self._delegation_prompted:
+                        self._delegation_prompted = True
+                        self.messages.append({"role": "system", "content":
+                            "The user explicitly required subagents, but no subagent was launched. "
+                            "Do not finalize yet. Launch at least one focused task with the task tool, "
+                            "then retrieve its result with task_status and integrate the findings."})
+                        continue
+                    if job_ids:
+                        deadline = time.monotonic() + 120
+                        while time.monotonic() < deadline and not self._stop_event.is_set():
+                            with self._subagent_jobs_lock:
+                                pending = [jid for jid in job_ids
+                                           if self._subagent_jobs.get(jid, {}).get("status") == "running"]
+                            if not pending:
+                                break
+                            self._stop_event.wait(0.5)
+                        summaries = []
+                        with self._subagent_jobs_lock:
+                            for jid in job_ids:
+                                job = self._subagent_jobs.get(jid, {})
+                                summaries.append(
+                                    f"{jid} [{job.get('status', 'unknown')}] {job.get('description', '')}: "
+                                    f"{str(job.get('result', 'Still running; collect later.'))[:5000]}")
+                        self.messages.append({"role": "system", "content":
+                            "Subagent execution results (integrate completed work; do not claim unfinished jobs succeeded):\n" +
+                            "\n\n".join(summaries)})
+                        self._delegation_required = False
+                        continue
+                    self.log_line("[delegation] no subagent result was produced after the required retry", "error")
+                    self._delegation_required = False
+                if (task is not None and self.execution_mode == "build"
+                        and not getattr(self, "_auto_verification_attempted", False)
+                        and self._verification_engine.should_verify(
+                            changed_paths=getattr(self, "_task_changed_paths", set()),
+                            status=getattr(self, "_last_run_status", "running"),
+                            already_verified=getattr(self, "_last_validation_result", None) is not None)):
+                    self._auto_verification_attempted = True
+                    self.log_line("[verification] running project validation before finalizing", "activity")
+                    validation_text = self._validate_project("")
+                    self.messages.append({"role": "system", "content":
+                        "Automatic verification result. If tests failed, inspect the failure and repair "
+                        "within the allowed validation budget before finalizing:\n" + str(validation_text)[:9000]})
+                    continue
                 if self._last_agent_answer.lower() in {"(done)", "done", "(completed)", "completed"}:
                     self.log_line("Done.", "dim")
                 elif self._last_agent_answer:
@@ -6941,6 +7299,11 @@ class App:
                 self._can_continue = False
                 self._stopped_last = False
                 self._last_run_status = "complete"
+                try:
+                    self._hook_bus.emit("task_completed", app=self, task=task,
+                                        progress=self._progress_tracker.snapshot())
+                except Exception as exc:
+                    self.log_line(f"[hooks] task_completed hook failed: {exc}", "dim")
                 # A normal assistant message ending is never treated as plan completion.
                 # Plan completion is signalled explicitly through the finish_plan tool.
                 return
@@ -6962,11 +7325,12 @@ class App:
                     return
 
                 name = tc.function.name
+                original_name = self._tool_original_names.get(name, name)
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                is_todo_tool = name in ("todo_write", "todo_read")
+                is_todo_tool = original_name in ("todo_write", "todo_read")
                 action_label = self._generate_activity_label(name, args) if not is_todo_tool else "Updating task plan"
                 if not is_todo_tool:
                     self.log_line(action_label, "activity")
@@ -6982,26 +7346,57 @@ class App:
                     self._last_run_status = "stopped"
                     return
                 denied = self._central_tool_permission(name, args)
+                if (self._delegation_required and not self._delegation_jobs_for_task
+                        and original_name not in {"task", "task_status", "todo_write", "todo_read"}
+                        and (original_name in PermissionEngine.STATEFUL
+                             or self._tool_source_types.get(name) in {"skill", "mcp", "addon", "system"})):
+                    denied = ("DELEGATION_REQUIRED: the user explicitly requested subagents. "
+                              "Launch a focused task with core_task first, then collect it with core_task_status. "
+                              "No implementation tool has been executed yet.")
                 if self._stop_event.is_set():
                     denied = "Stopped by user before tool execution."
                 try:
-                    if not self.core_mode:
-                        self.addon_manager.emit("before_tool_call", app=self, name=name,
-                                                arguments=dict(args))
-                    result = denied if denied else (fn(**args) if fn else f"unknown tool: {name}")
+                    loop_block = self._loop_guard.before_call(original_name, args)
+                    cached_result = (None if loop_block else
+                                     self._loop_guard.cached_read(original_name, args))
+                    if denied:
+                        result = denied
+                    elif loop_block:
+                        result = loop_block
+                        self.log_line("[loop guard] repeated operation blocked; choose a different strategy", "error")
+                    elif cached_result is not None:
+                        result = cached_result
+                        self.log_line("[context] reused the unchanged file-read result", "dim")
+                    else:
+                        self._hook_bus.emit("before_tool_call", fail_closed=True, app=self,
+                                            name=name, original_name=original_name,
+                                            arguments=dict(args))
+                        result = fn(**args) if fn else f"unknown tool: {name}"
                 except Exception as e:
                     result = f"ERROR: {e}"
                 finally:
-                    if not self.core_mode:
-                        self.addon_manager.emit("after_tool_call", app=self, name=name,
-                                                arguments=dict(args), result=locals().get("result"))
+                    self._loop_guard.after_call(original_name, args, locals().get("result", ""))
+                    self._progress_tracker.record(original_name, args, locals().get("result", ""))
+                    try:
+                        self._hook_bus.emit("after_tool_call", app=self, name=name,
+                                            original_name=original_name, arguments=dict(args),
+                                            result=locals().get("result"))
+                    except Exception as hook_exc:
+                        self.log_line(f"[hooks] after_tool_call hook failed: {hook_exc}", "dim")
 
                 tag = "error" if str(result).startswith(
-                    ("ERROR", "BLOCKED", "NOT_FOUND", "DENIED")) else "activity"
+                    ("ERROR", "BLOCKED", "NOT_FOUND", "DENIED", "LOOP_GUARD")) else "activity"
+                if tag == "error":
+                    try:
+                        self._hook_bus.emit("tool_error", app=self, name=name,
+                                            original_name=original_name, arguments=dict(args),
+                                            result=str(result)[:2000])
+                    except Exception as hook_exc:
+                        self.log_line(f"[hooks] tool_error hook failed: {hook_exc}", "dim")
                 # Show only a compact human-readable outcome, never raw tool
                 # arguments, shell commands, URLs, or serialized results.
                 if not is_todo_tool:
-                    self.log_line(describe_tool_result(name, args, str(result)), tag)
+                    self.log_line(describe_tool_result(original_name, args, str(result)), tag)
                 self.log_line(f"RESULT · {name}\n{str(result)[:2500]}", "detail")
                 if is_todo_tool:
                     self.root.after(0, self._refresh_todo_page)
@@ -7013,7 +7408,7 @@ class App:
                 })
                 self._save_local_chat()
 
-                if name == "finish_plan":
+                if original_name == "finish_plan":
                     plan_text = str(args.get("plan", "")).strip()
                     # The tool is only exposed in Plan Mode, but validate again at
                     # execution time so stale or malformed tool calls cannot trigger UI.
@@ -7022,7 +7417,8 @@ class App:
                         self._pending_plan_task = {"task": str(task), "plan": plan_text}
                         self.log_line("[plan] explicit PLAN_COMPLETE signal received — awaiting approval", "dim")
                         plan_completion_requested = True
-                    self.log_line("[plan] ignored invalid plan-completion signal", "error")
+                    else:
+                        self.log_line("[plan] ignored invalid plan-completion signal", "error")
 
             if plan_completion_requested:
                 # Finish processing every tool call in this assistant turn so the

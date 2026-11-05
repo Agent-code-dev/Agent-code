@@ -11,6 +11,7 @@ import json
 import re
 import sys
 import traceback
+from .tool_namespace import make_tool_name
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -114,6 +115,7 @@ class AddonManager:
         self.apis: list[AddonAPI] = []
         self.schemas: list[dict] = []
         self.callables: dict[str, Callable] = {}
+        self.tool_identities: dict[str, dict] = {}
         self.commands: dict[str, dict] = {}
         self.actions: list[dict] = []
         self.ui_contributions: list[dict] = []
@@ -145,7 +147,7 @@ class AddonManager:
         return found
 
     def load(self):
-        self.apis.clear(); self.schemas.clear(); self.callables.clear()
+        self.apis.clear(); self.schemas.clear(); self.callables.clear(); self.tool_identities.clear()
         self.commands.clear(); self.actions.clear(); self.ui_contributions.clear()
         self.services.clear(); self._loaded_modules.clear()
         for info in self.discover():
@@ -169,11 +171,17 @@ class AddonManager:
                 if not callable(register):
                     raise TypeError("addon.py must export register(api)")
                 register(api)
+                used_names = set(self.callables)
                 for schema, handler in api.tools:
-                    name = schema["function"]["name"]
-                    if name in self.callables:
-                        raise ValueError(f"duplicate add-on tool name: {name}")
-                    self.schemas.append(schema); self.callables[name] = handler
+                    original = schema["function"]["name"]
+                    name = make_tool_name(info.name, original, used_names)
+                    normalized = dict(schema)
+                    normalized["function"] = {**schema["function"], "name": name}
+                    self.schemas.append(normalized)
+                    self.callables[name] = handler
+                    self.tool_identities[name] = {"namespace": info.name,
+                                                  "original_name": original,
+                                                  "source_type": "addon"}
                 for name, definition in api.commands.items():
                     if name in self.commands:
                         raise ValueError(f"duplicate add-on command: {name}")

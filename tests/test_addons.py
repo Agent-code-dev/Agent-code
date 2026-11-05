@@ -22,7 +22,7 @@ def test_addon_registers_tool_command_and_action(tmp_path):
     (folder / "addon.json").write_text(json.dumps({"name": "demo", "version": "1"}))
     (folder / "addon.py").write_text('''
 def register(api):
-    api.register_tool({"type":"function","function":{"name":"demo_ping","description":"Ping","parameters":{"type":"object","properties":{}}}}, lambda: "pong")
+    api.register_tool({"type":"function","function":{"name":"ping","description":"Ping","parameters":{"type":"object","properties":{}}}}, lambda: "pong")
     api.register_command("hello", lambda args, log: "hello", "Say hello")
     api.register_action("open", lambda: None)
 ''')
@@ -44,7 +44,7 @@ def test_disabled_addon_is_not_imported(tmp_path):
     assert manager.infos[0].enabled is False
 
 
-def test_duplicate_tool_name_is_reported_without_crashing(tmp_path):
+def test_duplicate_tool_names_are_namespaced_per_addon(tmp_path):
     for name in ("one", "two"):
         folder = tmp_path / name
         folder.mkdir()
@@ -55,8 +55,9 @@ def register(api):
 ''')
     manager = AddonManager(tmp_path)
     manager.load()
-    assert len(manager.callables) == 1
-    assert any("duplicate add-on tool name" in info.error for info in manager.infos)
+    assert len(manager.callables) == 2
+    assert set(manager.callables) == {"one_shared", "two_shared"}
+    assert not any(info.error for info in manager.infos)
 
 
 def test_addon_can_register_live_ui_contribution(tmp_path):

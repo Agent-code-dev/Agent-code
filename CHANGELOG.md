@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-11-04
+
+### Added
+- **Unified Tool Namespace (UTN):** every active Core, Native Skill, MCP, Add-on, and system tool is registered through one global collision-safe registry. Provider-facing names are automatically prefixed by their source (`core_`, Skill name, MCP server, or Add-on name), while original handlers remain correctly mapped.
+- **Skill Execution Environments:** Skills can declare `host`, `sandbox`, `ssh`, or `auto` execution in `SKILL` metadata. Remote-only Skills are inspected without importing their Python module on Host; Sandbox execution uses a read-only mounted Skills directory and SSH execution uses a temporary uploaded package that is cleaned up after the call. Missing targets fail closed without Host fallback.
+- **Runtime Coordination:** added progress tracking, planning policy, verification state, lifecycle hooks, and centralized permission classification.
+- **Subagent Delegation Enforcement:** explicit user requests to use subagents now require an actual delegated task and result integration. Subagents have bounded concurrency and their own duplicate-call guard.
+- **Automatic Verification:** completed Build tasks with tracked file changes run a safe detected validation command before finalizing when validation has not already been performed.
+- **Agent Loop Guard:** blocks repeated identical tool calls, detects highly similar repeated searches, and reuses unchanged file-read results using file metadata signatures.
+
+### Fixed
+- **Gemini 3 Tool Calling:** preserve Google's opaque `extra_content.google.thought_signature` metadata when streaming, serializing, compacting, saving, and replaying assistant tool calls. Also handle streamed tool calls that omit the OpenAI `index` field, including parallel calls. Detect legacy chats whose signatures cannot be recovered and show a clear recovery message; add targeted diagnostics if a provider/proxy still strips the metadata.
+- **TUI Transcript Rendering:** corrected the bottom-anchored viewport calculation that hid the newest lines and final assistant answer. Rendering now wraps and clips by terminal cell width, improving wide-character display and narrow-terminal behavior.
+- **Tool Dispatch:** all execution and permission checks now resolve the original tool identity behind its provider-facing namespace, including Plan Mode, Todo tools, and `finish_plan`.
+- **Skill Loading Safety:** remote-only Skills with literal metadata and schemas are no longer imported into the Host process during discovery. Mixed Host/remote Skills are rejected and must be split.
+- **Skill Server Compatibility:** restored the `extract_python_sources` compatibility alias for bounded archive validation.
+
+### Changed
+- Updated Skills and Add-on developer documentation for automatic tool namespacing and execution target declarations.
+- Bumped package version to 2.1.0.
+- Fixed the MCP manager refresh callback's undefined connection-state variable.
+- Restored TUI API-key access through the OS keyring and made secret input reliably blocking.
+- Added TUI Skills and Add-ons management pages with enable/disable and bundled-skill installation.
+- Added regression coverage for MCP refresh and TUI management integration.
+
 ## [2.0.0]
 
 ### ✨ Added
@@ -104,3 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Bumped package version to 2.0.1.
+
+### Post-release TUI maintenance (still 2.1.0)
+- Rebuilt the terminal interface with a responsive navigation rail, clearer session/provider status, dedicated page layouts, a persistent composer, and readable management screens.
+- Added in-place message editing (left/right, Home/End, Delete, Ctrl+U, Ctrl+W), scrollable selection dialogs, and safer handling of small terminal sizes and unsupported cursor operations.
+- Fixed the TUI `UnboundLocalError` caused by importing `re` inside `answer()` after the same function had already used the module-level regular expression object.
+- Added a regression test to prevent local shadowing of the module-level `re` import.

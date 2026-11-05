@@ -16,7 +16,7 @@ def test_diagnostics_never_include_api_key(tmp_path, monkeypatch):
     assert "pass" not in json.dumps(report)
     assert "hidden" not in json.dumps(report)
     assert "API key configured" in next(c["detail"] for c in report["checks"] if c["name"] == "User configuration")
-    assert report["version"] == "2.0.1"
+    assert report["version"] == "2.1.0"
 
 
 def test_diagnostics_handles_corrupt_config(tmp_path, monkeypatch):

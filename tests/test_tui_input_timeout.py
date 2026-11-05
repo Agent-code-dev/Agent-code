@@ -64,3 +64,52 @@ def test_chat_text_removes_terminal_escape_sequences():
 
 def test_chat_text_has_fallback_for_empty_provider_content():
     assert TUI._chat_text(None) == "(empty response)"
+
+
+def test_chat_viewport_shows_the_latest_assistant_message():
+    rendered = TUI.render_chat_lines([
+        ("user", "older question"),
+        ("assistant", "older answer"),
+        ("user", "current question"),
+        ("assistant", "LATEST ANSWER MUST BE VISIBLE"),
+    ], 24)
+    visible, max_scroll, scroll = TUI.visible_chat_lines(rendered, viewport=5, scroll=0)
+    assert max_scroll > 0
+    assert scroll == 0
+    assert "".join(line for line, _ in visible).replace(" ", "").find("LATESTANSWERMUSTBEVISIBLE") >= 0
+
+
+def test_chat_renderer_wraps_wide_terminal_characters_by_cell_width():
+    lines = TUI._wrap_terminal_line("A界B界C", 4)
+    assert lines == ["A界B", "界C"]
+
+
+class RecordingScreen:
+    def __init__(self, height=24, width=80):
+        self.height, self.width = height, width
+        self.cells = {}
+    def getmaxyx(self): return self.height, self.width
+    def erase(self): self.cells.clear()
+    def addstr(self, y, x, text, attr=0): self.cells[(y, x)] = str(text)
+    def refresh(self): pass
+
+
+def test_draw_renders_latest_answer_inside_the_real_chat_viewport(monkeypatch):
+    tui = TUI.__new__(TUI)
+    tui.s = RecordingScreen()
+    tui.messages = [("user", "Please fix the issue"),
+                    ("assistant", "The fix is complete and all checks passed.")]
+    tui.page = "Chat"
+    tui.mode = "Build"
+    tui.cfg = {"provider_name": "OpenAI"}
+    tui.notice = "Ready"
+    tui.input = ""
+    tui.busy = False
+    tui.scroll = 0
+    tui.activity = []
+    tui.tool_details = []
+    monkeypatch.setattr(curses, "color_pair", lambda _: 0)
+    tui.draw()
+    transcript = " ".join(tui.s.cells.values())
+    assert "The fix is complete" in transcript
+    assert "all checks passed" in transcript

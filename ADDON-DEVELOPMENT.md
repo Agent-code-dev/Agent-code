@@ -38,6 +38,16 @@ def register(api):
     api.on("tools_loaded", lambda **ctx: None)
 ```
 
+## Agent tool namespacing
+
+Add-on tool authors should register a short, local function name such as
+`search` or `write_file`. Agent Code automatically registers it as
+`<addon-name>_<tool-name>` (for example `my_extension_search`). Do not add the
+add-on prefix yourself. Core, Native Skill, MCP, Add-on, and future system tool
+sources all pass through the global Unified Tool Namespace before their
+schemas are sent to an AI provider. Duplicate local names across different
+add-ons are therefore supported and remain bound to their own handlers.
+
 ## UI extension points
 
 `register_ui(name, builder, location=..., label=..., description=...)` supports `sidebar`, `addons`, `settings`, `toolbar`, and `workspace`. The builder receives `(parent, app)` and should return a Tk/CustomTkinter widget. The host places the returned widget. Keep builders fast and do not block the UI thread.

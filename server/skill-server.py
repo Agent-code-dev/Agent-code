@@ -712,6 +712,11 @@ def extract_reviewable_sources(blob):
     return sources, None
 
 
+def extract_python_sources(blob):
+    """Backward-compatible name for the bounded ZIP source validator."""
+    return extract_reviewable_sources(blob)
+
+
 # ===========================================================================
 # HTTP handler
 # ===========================================================================
