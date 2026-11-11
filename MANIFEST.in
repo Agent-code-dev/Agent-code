@@ -1,4 +1,7 @@
 include README.md
 include LICENSE
 recursive-include src/agent_code/data *.py *.md
-recursive-include docs *.html
+recursive-include docs *.html *.md
+
+include CHANGELOG.md
+include RELEASE_NOTES_*.md

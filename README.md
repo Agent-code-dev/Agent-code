@@ -58,6 +58,29 @@ One application. Multiple extension systems. Your choice of AI provider.
 
 ✨ Features
 
+### Automatic project validation
+
+The validation helper can recognize common test entry points for Python, Rust, Go, and Node projects. It does not install dependencies or configure build systems. Node package-manager test scripts (`npm`, `pnpm`, `yarn`, or `bun`) always require a direct approval because package scripts can run arbitrary project commands, even when the general permission mode is Auto.
+
+### Project-aware context filtering
+
+Agent Code reads `.gitignore` and `.agentignore` while building its bounded project map. Add patterns to `.agentignore` to skip generated output, vendored dependencies, large assets, or folders that are irrelevant to the current task. Example:
+
+```gitignore
+# Generated files and dependencies
+node_modules/
+dist/
+build/
+coverage/
+*.min.js
+
+# Keep source maps out of the agent context
+*.map
+```
+
+Hard safety exclusions (including `.env`, credential files, and SSH keys) cannot be overridden by negation patterns.
+
+
 <table>
   <tr>
     <td width="50%" valign="top">🤖 AI Coding Agent
@@ -700,6 +723,7 @@ agent-code gui
 Launch the terminal interface
 
 agent-code tui
+agent-code configure  # open the interactive settings center
 
 The TUI is useful for headless Linux environments and SSH sessions.
 
@@ -766,7 +790,9 @@ Application commands
 Command| Description
 "agent-code"| Launch the application
 "agent-code gui"| Explicitly launch the desktop GUI
-"agent-code tui"| Launch the terminal interface
+"agent-code tui"| Launch the Textual terminal workspace
+"agent-code configure"| Open the interactive Textual settings center
+"agent-code tui-legacy"| Launch the classic curses terminal interface
 "agent-code doctor"| Check the local environment
 "agent-code doctor --json"| Print diagnostic information as JSON
 "agent-code doctor --output report.json"| Save a diagnostic report
@@ -887,6 +913,7 @@ The project uses a "src/"-based Python package structure.
 The repository includes offline-friendly HTML documentation.
 
 Documentation| Description
+📦 "Release from Codespaces" (docs/RELEASING-CODESPACES.md) | Build, test, tag, GitHub Release and PyPI publishing
 📖 "User Guide" (docs/index.html)| Installation, configuration, workflows, permissions, browser, SSH and troubleshooting
 🧩 "Skills Guide" (docs/skills.html)| Skill structure, tool schemas, commands and development
 🔌 "Add-on Guide" (docs/addons.html)| Application extension API, UI contributions, actions, hooks and services
@@ -914,6 +941,7 @@ Agent-code/
 │       ├── doctor.py
 │       ├── cli.py
 │       ├── tui.py
+│       ├── textual_tui.py
 │       │
 │       └── data/
 │           ├── icons/

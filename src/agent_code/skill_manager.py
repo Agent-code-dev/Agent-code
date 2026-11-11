@@ -21,33 +21,7 @@ import urllib.parse
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
 import tkinter as tk
-
-try:
-    import customtkinter as ctk
-    _CUSTOMTKINTER_AVAILABLE = True
-except ImportError:  # Keep non-GUI Skills Store helpers usable in headless environments.
-    _CUSTOMTKINTER_AVAILABLE = False
-
-    class _CustomTkinterUnavailable:
-        # Class declarations need a base class at import time; actual UI startup
-        # is guarded by _require_customtkinter() below.
-        CTkFrame = tk.Frame
-
-        def __getattr__(self, name):
-            raise ImportError(
-                "The Skills Store interface requires customtkinter. "
-                "Install the project dependencies before opening the GUI."
-            )
-
-    ctk = _CustomTkinterUnavailable()
-
-
-def _require_customtkinter():
-    if not _CUSTOMTKINTER_AVAILABLE:
-        raise RuntimeError(
-            "The Skills Store interface requires customtkinter. "
-            "Install the project dependencies before opening the GUI."
-        )
+import customtkinter as ctk
 
 
 # ---------------------------------------------------------------------------
@@ -766,7 +740,6 @@ class PublishDialog(ctk.CTkFrame):
 
 class SkillStore(tk.Frame):
     def __init__(self, parent=None, on_skills_changed=None, skills_dir=None):
-        _require_customtkinter()
         self._owns_root = parent is None
         if parent is None:
             parent = ctk.CTk()
@@ -1530,7 +1503,6 @@ class SkillStore(tk.Frame):
 # ---------------------------------------------------------------------------
 
 def main():
-    _require_customtkinter()
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()

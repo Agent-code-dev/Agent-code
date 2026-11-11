@@ -196,3 +196,72 @@ def test_restore_rejects_paths_outside_checkpoint(tmp_path):
             assert 'not part' in str(exc)
         else:
             raise AssertionError('out-of-checkpoint paths must be rejected')
+
+
+def test_project_analysis_honors_agentignore_and_gitignore(tmp_path):
+    (tmp_path / 'src').mkdir()
+    (tmp_path / 'src' / 'keep.py').write_text('print(1)', encoding='utf-8')
+    (tmp_path / 'src' / 'generated.py').write_text('generated', encoding='utf-8')
+    (tmp_path / 'artifacts').mkdir()
+    (tmp_path / 'artifacts' / 'bundle.js').write_text('bundle', encoding='utf-8')
+    (tmp_path / 'notes.tmp').write_text('temporary', encoding='utf-8')
+    (tmp_path / '.gitignore').write_text('*.tmp\n', encoding='utf-8')
+    (tmp_path / '.agentignore').write_text('src/generated.py\nartifacts/\n', encoding='utf-8')
+
+    info = analyze_project(tmp_path)
+    assert 'src/keep.py' in info['files']
+    assert 'src/generated.py' not in info['files']
+    assert 'artifacts/bundle.js' not in info['files']
+    assert 'notes.tmp' not in info['files']
+    assert info['ignore_rules'] == 3
+    assert set(info['ignore_files']) == {'.gitignore', '.agentignore'}
+
+
+def test_project_ignore_rules_cannot_expose_sensitive_files(tmp_path):
+    (tmp_path / '.env').write_text('API_KEY=secret', encoding='utf-8')
+    (tmp_path / 'credentials.txt').write_text('secret', encoding='utf-8')
+    (tmp_path / '.agentignore').write_text('!*.env\n!credentials.txt\n', encoding='utf-8')
+    info = analyze_project(tmp_path)
+    assert '.env' not in info['files']
+    assert 'credentials.txt' not in info['files']
+
+
+def test_project_analysis_supports_negated_file_inside_ignored_directory(tmp_path):
+    (tmp_path / 'cache').mkdir()
+    (tmp_path / 'cache' / 'keep.py').write_text('important', encoding='utf-8')
+    (tmp_path / 'cache' / 'drop.py').write_text('generated', encoding='utf-8')
+    (tmp_path / '.agentignore').write_text('cache/\n!cache/keep.py\n', encoding='utf-8')
+    info = analyze_project(tmp_path)
+    assert 'cache/keep.py' in info['files']
+    assert 'cache/drop.py' not in info['files']
+
+
+def test_detect_validation_command_for_python_rust_and_go(tmp_path):
+    from agent_code.advanced_features import detect_validation_command
+    (tmp_path / 'pyproject.toml').write_text('[project]', encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'python -m pytest -q'
+    (tmp_path / 'pyproject.toml').unlink()
+    (tmp_path / 'Cargo.toml').write_text('[package]', encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'cargo test'
+    (tmp_path / 'Cargo.toml').unlink()
+    (tmp_path / 'go.mod').write_text('module example', encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'go test ./...'
+
+
+def test_detect_validation_command_selects_node_package_manager(tmp_path):
+    import json
+    from agent_code.advanced_features import detect_validation_command
+    (tmp_path / 'package.json').write_text(json.dumps({'scripts': {'test': 'vitest run'}}), encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'npm test'
+    (tmp_path / 'pnpm-lock.yaml').write_text('lockfileVersion: 9', encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'pnpm test'
+    (tmp_path / 'pnpm-lock.yaml').unlink()
+    (tmp_path / 'yarn.lock').write_text('# yarn', encoding='utf-8')
+    assert detect_validation_command(tmp_path) == 'yarn test'
+
+
+def test_detect_validation_command_does_not_run_or_guess_missing_node_test(tmp_path):
+    import json
+    from agent_code.advanced_features import detect_validation_command
+    (tmp_path / 'package.json').write_text(json.dumps({'scripts': {'build': 'vite build'}}), encoding='utf-8')
+    assert detect_validation_command(tmp_path) is None

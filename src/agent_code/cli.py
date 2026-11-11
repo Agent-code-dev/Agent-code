@@ -27,6 +27,12 @@ def main(argv=None):
                    help="install skills into ~/.agent-code/skills")
     p.set_defaults(func=_manage)
 
+    p = sub.add_parser("configure", help="open the interactive Textual settings center")
+    p.set_defaults(func=_configure)
+
+    p = sub.add_parser("tui-legacy", help="open the classic curses terminal interface")
+    p.set_defaults(func=_tui_legacy)
+
     p = sub.add_parser("gui", help="launch the desktop GUI explicitly")
     p.set_defaults(func=_gui)
 
@@ -108,7 +114,15 @@ def _ensure_linux_tkinter():
 def _tui(args):
     if getattr(args, "global_paths", False):
         os.environ["AGENT_CODE_GLOBAL"] = "1"
+    from .textual_tui import main as run_tui
+    return run_tui()
+
+def _tui_legacy(args):
     from .tui import main as run_tui
+    return run_tui()
+
+def _configure(args):
+    from .textual_tui import main as run_tui
     return run_tui()
 
 def _gui(args):

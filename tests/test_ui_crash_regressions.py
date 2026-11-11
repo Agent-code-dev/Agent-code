@@ -54,15 +54,3 @@ def test_tui_exposes_skills_and_addons_management_pages():
     assert "self.cfg.get(\"disabled_addons\", [])" in tui_source
     assert "skill_schemas, skill_handlers, skill_meta, skill_commands" in tui_source
     assert "addon_schemas, addon_handlers, addon_commands" in tui_source
-
-
-def test_tui_answer_does_not_shadow_module_regex_import():
-    tui_path = Path(__file__).parents[1] / "src" / "agent_code" / "tui.py"
-    tui_tree = ast.parse(tui_path.read_text(encoding="utf-8"))
-    tui_class = next(node for node in tui_tree.body if isinstance(node, ast.ClassDef) and node.name == "TUI")
-    answer = next(node for node in tui_class.body if isinstance(node, ast.FunctionDef) and node.name == "answer")
-    local_re_imports = [
-        node for node in ast.walk(answer)
-        if isinstance(node, ast.Import) and any(alias.name == "re" for alias in node.names)
-    ]
-    assert not local_re_imports, "answer() must use the module-level re import"

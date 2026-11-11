@@ -4,13 +4,13 @@ This module deliberately has no UI dependencies so its safety-critical behavior
 can be tested independently of CustomTkinter.
 """
 from __future__ import annotations
-import json, os, shutil, subprocess, time, hashlib, difflib
+import json, os, shutil, subprocess, time, hashlib, difflib, fnmatch
 from pathlib import Path
 
 SKIP_DIRS = {'.git', '.hg', '.svn', '__pycache__', '.venv', 'venv', 'node_modules',
              'dist', 'build', 'target', '.mypy_cache', '.pytest_cache'}
 PROJECT_FILES = ('pyproject.toml', 'requirements.txt', 'package.json', 'Cargo.toml',
-                 'go.mod', 'CMakeLists.txt', 'README.md', 'AGENTS.md', 'AGENT.md', 'CLAUDE.md')
+                 'go.mod', 'CMakeLists.txt', 'README.md', 'AGENTS.md', 'AGENT.md', 'CLAUDE.md', '.agentignore')
 SENSITIVE_PARTS = {'.env', '.ssh', '.aws', '.config', 'credentials', 'secrets', 'id_rsa', 'id_ed25519'}
 
 
@@ -20,18 +20,92 @@ def _safe_relative(root: Path, rel: str) -> Path:
     return path
 
 
+def _load_ignore_rules(root: Path) -> list[str]:
+    """Load root .agentignore and .gitignore patterns without executing project code."""
+    rules: list[str] = []
+    for filename in ('.gitignore', '.agentignore'):
+        path = root / filename
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 64_000:
+            continue
+        try:
+            for raw in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                rule = raw.strip()
+                if not rule or rule.startswith('#'):
+                    continue
+                if rule.startswith('\\#'):
+                    rule = rule[1:]
+                rules.append(rule)
+        except OSError:
+            continue
+    return rules
+
+
+def _matches_ignore(rel: str, is_dir: bool, rules: list[str]) -> bool:
+    """Apply a practical gitignore-style subset; hard safety exclusions are separate."""
+    rel = rel.strip('/')
+    ignored = False
+    for raw in rules:
+        negate = raw.startswith('!')
+        pattern = raw[1:] if negate else raw
+        if not pattern:
+            continue
+        directory_only = pattern.endswith('/')
+        pattern = pattern.strip('/')
+        if not pattern:
+            continue
+        has_slash = '/' in pattern
+        candidates = [rel] if has_slash else rel.split('/')
+        matched = any(fnmatch.fnmatchcase(candidate, pattern) or
+                      (candidate == pattern) for candidate in candidates)
+        if directory_only and not is_dir:
+            # A directory rule also covers descendants.
+            matched = matched or any(part == pattern for part in rel.split('/')[:-1])
+        if matched:
+            ignored = not negate
+    return ignored
+
+
+def _may_reinclude_descendant(rel_dir: str, rules: list[str]) -> bool:
+    """Keep an ignored directory traversable when a later negation may select a child."""
+    prefix = rel_dir.strip('/') + '/'
+    for raw in rules:
+        if not raw.startswith('!'):
+            continue
+        pattern = raw[1:].lstrip('/')
+        if not pattern:
+            continue
+        if '/' not in pattern or pattern.startswith(prefix) or prefix.startswith(pattern.rstrip('/') + '/'):
+            return True
+    return False
+
+
 def analyze_project(root: str | Path, max_files: int = 180) -> dict:
-    """Bounded, non-recursive-risk project summary; skips common secret/build paths."""
+    """Bounded project summary honoring .agentignore/.gitignore and hard secret exclusions."""
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError('project root is not a directory')
     found, langs, configs, tests = [], set(), [], []
+    ignore_rules = _load_ignore_rules(root)
     for base, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
+        base_path = Path(base)
+        rel_base = base_path.relative_to(root).as_posix()
+        kept_dirs = []
+        for d in dirs:
+            rel_dir = (rel_base + '/' if rel_base != '.' else '') + d
+            if d in SKIP_DIRS or d.startswith('.'):
+                continue
+            if any(part in rel_dir.lower() for part in SENSITIVE_PARTS):
+                continue
+            if _matches_ignore(rel_dir, True, ignore_rules) and not _may_reinclude_descendant(rel_dir, ignore_rules):
+                continue
+            kept_dirs.append(d)
+        dirs[:] = kept_dirs
         for name in files:
-            p = Path(base) / name
+            p = base_path / name
             rel = p.relative_to(root).as_posix()
             low = rel.lower()
+            if _matches_ignore(rel, False, ignore_rules):
+                continue
             if any(part in low for part in SENSITIVE_PARTS) or name.lower().startswith('.env'):
                 continue
             if len(found) >= max_files: break
@@ -60,12 +134,14 @@ def analyze_project(root: str | Path, max_files: int = 180) -> dict:
         except (OSError, subprocess.SubprocessError): pass
     return {'root': str(root), 'languages': sorted(langs), 'configs': sorted(set(configs)),
             'test_files': sorted(tests)[:60], 'files': found, 'truncated': len(found) >= max_files,
-            'instructions': '\n\n'.join(instructions), 'git_status': git}
+            'instructions': '\n\n'.join(instructions), 'git_status': git,
+            'ignore_rules': len(ignore_rules), 'ignore_files': [n for n in ('.gitignore', '.agentignore') if (root / n).is_file()]}
 
 
 def render_project_summary(info: dict) -> str:
     lines = [f"Project root: {info['root']}", 'Languages: ' + (', '.join(info['languages']) or 'unknown'),
              'Configuration/instruction files: ' + (', '.join(info['configs']) or 'none detected'),
+             'Ignore rules loaded: ' + str(info.get('ignore_rules', 0)) + ' (' + ', '.join(info.get('ignore_files', [])) + ')',
              'Likely test files: ' + (', '.join(info['test_files'][:25]) or 'none detected'),
              'Project files (bounded): ' + ', '.join(info['files'][:100])]
     if info.get('truncated'): lines.append('(file listing truncated for performance)')
@@ -319,6 +395,36 @@ def run_validation(command: list[str], cwd: str | Path, timeout=90) -> dict:
         return {'status':'missing_dependency', 'returncode':None, 'stdout':'', 'stderr':str(exc)}
     except subprocess.TimeoutExpired as exc:
         return {'status':'timeout', 'returncode':None, 'stdout':_bounded_log(str(exc.stdout or ''), 1000), 'stderr':_bounded_log(str(exc.stderr or ''), 1000)}
+
+
+def detect_validation_command(root: str | Path) -> str | None:
+    """Detect a conservative project test command without executing package scripts."""
+    root = Path(root).expanduser().resolve()
+    if not root.is_dir():
+        return None
+    if (root / 'pyproject.toml').is_file() or any(root.glob('test_*.py')):
+        return 'python -m pytest -q'
+    if (root / 'Cargo.toml').is_file():
+        return 'cargo test'
+    if (root / 'go.mod').is_file():
+        return 'go test ./...'
+    package = root / 'package.json'
+    if package.is_file() and not package.is_symlink() and package.stat().st_size <= 256_000:
+        try:
+            data = json.loads(package.read_text(encoding='utf-8'))
+            scripts = data.get('scripts', {}) if isinstance(data, dict) else {}
+            if isinstance(scripts, dict) and isinstance(scripts.get('test'), str) and scripts['test'].strip():
+                if (root / 'pnpm-lock.yaml').exists(): return 'pnpm test'
+                if (root / 'yarn.lock').exists(): return 'yarn test'
+                if (root / 'bun.lockb').exists() or (root / 'bun.lock').exists(): return 'bun test'
+                return 'npm test'
+        except (OSError, ValueError, TypeError):
+            return None
+    if (root / 'CMakeLists.txt').is_file():
+        return None
+    if any(root.glob('*.py')):
+        return 'python -m compileall -q .'
+    return None
 
 
 def build_task_report(checkpoint: dict | None, status: str = 'completed', validation: dict | None = None) -> dict:

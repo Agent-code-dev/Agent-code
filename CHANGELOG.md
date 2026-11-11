@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2026-11-11
+
+### Added
+- Project context now honors root `.agentignore` and `.gitignore` patterns, including common directory exclusions and ordered negation rules.
+- Hard sensitive-path exclusions remain non-overridable, even when ignore rules attempt to re-include those files.
+- Project context reports which ignore files were loaded and how many rules were applied.
+- Added conservative test-command discovery for Python, Rust, Go, and Node projects. Node package scripts always require explicit user approval, including under Auto permission mode.
+- Added GitHub Actions CI and tag-triggered publishing workflow for GitHub Releases and PyPI Trusted Publishing.
+- Added a Codespaces release guide covering tests, build, tag, GitHub release, and PyPI publication.
+
+### Changed
+- Bumped package version from 2.1.8 to 2.2.0.
+
+---
+
+## [2.1.8] - 2026-11-11
+
+### Added
+- **Ultra Unrestricted Agent Code**: explicit, opt-in permission mode in Desktop Settings and Textual TUI. After a warning confirmation it auto-approves available tools, enables host shell/background commands, and permits host working directories outside the workspace.
+- Ultra mode remains constrained by the current OS account's permissions, active blacklist checks, and Plan Mode's read-only boundary; it does not elevate to root/Administrator.
+- Added regression tests for opt-in, warning confirmation, execution scope, and permission-gate ordering.
+
+### Changed
+- Bumped package version to 2.1.8.
+
+---
+
+## [2.1.4] - 2026-11-07
+
+### Fixed
+- Rebuilt desktop Settings tab construction around first-visit lazy loading. MCP manager, SSH controls, Podman controls, and other settings panels are no longer instantiated together when Settings opens.
+- Moved Podman status probing off the Tk UI thread and marshalled only the result update back to the UI thread.
+- Preserved persisted values for settings tabs that the user has not opened before pressing Save.
+- Added regression checks for lazy panel construction, save behavior, and non-blocking Podman status checks.
+
+### Changed
+- Bumped package version to 2.1.4.
+
 ## [2.1.0] - 2026-11-04
 
 ### Added
@@ -18,7 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent Loop Guard:** blocks repeated identical tool calls, detects highly similar repeated searches, and reuses unchanged file-read results using file metadata signatures.
 
 ### Fixed
-- **Gemini 3 Tool Calling:** preserve Google's opaque `extra_content.google.thought_signature` metadata when streaming, serializing, compacting, saving, and replaying assistant tool calls. Also handle streamed tool calls that omit the OpenAI `index` field, including parallel calls. Detect legacy chats whose signatures cannot be recovered and show a clear recovery message; add targeted diagnostics if a provider/proxy still strips the metadata.
 - **TUI Transcript Rendering:** corrected the bottom-anchored viewport calculation that hid the newest lines and final assistant answer. Rendering now wraps and clips by terminal cell width, improving wide-character display and narrow-terminal behavior.
 - **Tool Dispatch:** all execution and permission checks now resolve the original tool identity behind its provider-facing namespace, including Plan Mode, Todo tools, and `finish_plan`.
 - **Skill Loading Safety:** remote-only Skills with literal metadata and schemas are no longer imported into the Host process during discovery. Mixed Host/remote Skills are rejected and must be split.
@@ -27,10 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated Skills and Add-on developer documentation for automatic tool namespacing and execution target declarations.
 - Bumped package version to 2.1.0.
-- Fixed the MCP manager refresh callback's undefined connection-state variable.
-- Restored TUI API-key access through the OS keyring and made secret input reliably blocking.
-- Added TUI Skills and Add-ons management pages with enable/disable and bundled-skill installation.
-- Added regression coverage for MCP refresh and TUI management integration.
 
 ## [2.0.0]
 
@@ -130,8 +163,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Bumped package version to 2.0.1.
 
-### Post-release TUI maintenance (still 2.1.0)
-- Rebuilt the terminal interface with a responsive navigation rail, clearer session/provider status, dedicated page layouts, a persistent composer, and readable management screens.
-- Added in-place message editing (left/right, Home/End, Delete, Ctrl+U, Ctrl+W), scrollable selection dialogs, and safer handling of small terminal sizes and unsupported cursor operations.
-- Fixed the TUI `UnboundLocalError` caused by importing `re` inside `answer()` after the same function had already used the module-level regular expression object.
-- Added a regression test to prevent local shadowing of the module-level `re` import.
+## [2.1.1] - 2026-11-05
+
+### Fixed
+- Fixed the MCP settings crash caused by an undefined `connected` variable while rendering server actions.
+- Fixed TUI prompt input being interrupted by the main curses polling timeout; prompts now temporarily use blocking input and restore the UI timeout afterward.
+- Fixed TUI API-key entry and made the TUI use the same OS credential-vault references as the desktop GUI. Failed vault writes are reported instead of silently saving credentials as plaintext.
+
+### Added
+- Added Skills management to the TUI: list installed Skills, enable/disable a selected Skill, and install bundled Skills.
+- Added an Add-ons manager page to the TUI: list, enable/disable, and create starter Add-ons.
+- Added native Skill and Add-on tools to TUI agent requests, preserving their namespaced tool identities.
+
+## [2.1.5] - 2026-11-07
+- Unified GUI, Textual TUI, and runtime settings persistence in `settings_store.py`.
+- Added atomic, permission-restricted config writes and centralized OS-vault secret handling.
+
+## 2.1.5 — Task Workspace history integration
+
+- Added a bounded per-user task archive so new tasks no longer overwrite the previous task record.
+- Added newest-first task discovery, task detail inspection, trajectory display, and safe objective re-run from the Textual TUI Tasks page.
+- Persisted desktop GUI task start and terminal status into the same per-user task archive.
+- Added tests for multi-task retention, ordering, corrupt history files, ID validation, and pruning.
+
+## 2.1.5 — Desktop Task Workspace
+- Added a desktop sidebar entry for Task Workspace.
+- Added a GUI task archive browser with task status, timestamps, objective, plan, and trajectory details.
+- Added refresh and objective re-run as a new task, preserving archived history.
+
+## 2.1.5 — Task Recovery Checkpoints
+- Persist restartable conversation checkpoints after completed tool results.
+- Add desktop GUI recovery action alongside objective rerun.
+- Omit binary/image payloads from checkpoint snapshots and preserve task history atomically.
+
+
+## [2.1.6] - 2026-11-11
+
+- Add a local SQLite model-protocol catalog for provider/model capabilities.
+- Preserve Qwen `reasoning_content` through streamed tool-call turns.
+- Support explicit MiniMax native `<minimax:tool_call>` text blocks as a fallback while retaining structured API `tool_calls` as the default.
+- Add bounded parsing, known-tool validation, and incremental transcript filtering for native MiniMax tool markup.
+- Add protocol registry and parser regression tests.
+
+## [2.1.7] - 2026-11-11
+
+- Add prompt-injection defense and explicit untrusted-data boundaries across desktop, Sub-Agent, and TUI histories.
+- Add alias-configured blacklist files for file access and search visibility.
+- Add opt-in unrestricted host shell, disabled by default and guarded by per-command confirmation; Podman remains container-isolated.
+- Integrate model protocol capability handling into Sub-Agent and TUI requests, including reasoning metadata and MiniMax native text-call fallback.
+- Cache protocol database initialization and add regression coverage for the new security and protocol paths.
