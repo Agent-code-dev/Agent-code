@@ -28,6 +28,8 @@ class AddonInfo:
     path: str = ""
     enabled: bool = True
     error: str = ""
+    permissions: list[str] = field(default_factory=list)
+    api_version: int = 1
 
 
 class AddonAPI:
@@ -39,13 +41,20 @@ class AddonAPI:
         self.hooks: dict[str, list[Callable]] = {}
         self.actions: list[dict] = []
         self.ui_contributions: list[dict] = []
+        self.web_components: list[dict] = []
         self.services: list[dict] = []
         self.capabilities: list[str] = []
+        self.web_components: list[dict] = []
 
     def register_tool(self, schema: dict, handler: Callable):
         if not isinstance(schema, dict) or not callable(handler):
             raise TypeError("register_tool expects a tool schema and callable handler")
         fn = schema.get("function", {})
+        if schema.get("type") != "function" or not isinstance(fn, dict):
+            raise ValueError("tool schema must be an OpenAI function tool schema")
+        params = fn.get("parameters", {})
+        if not isinstance(params, dict) or params.get("type") not in (None, "object"):
+            raise ValueError("tool parameters must be a JSON Schema object")
         name = fn.get("name") if isinstance(fn, dict) else None
         if not name or not _NAME_RE.fullmatch(name):
             raise ValueError("tool schema must contain a valid function.name")
@@ -72,18 +81,42 @@ class AddonAPI:
                              "description": str(description)})
 
     def register_ui(self, name: str, builder: Callable, *, location: str = "addons",
-                    label: str | None = None, description: str = ""):
+                    label: str | None = None, description: str = "", backend: str = "tk"):
         """Register a live UI contribution.
 
         Supported locations: sidebar, addons, settings, toolbar, workspace.
-        builder(parent, app) must create and return a Tk/CustomTkinter widget.
+        builder(parent, app) must create and return a CustomTkinter widget.
+        The authenticated WebUI uses register_web_component instead.
         """
         allowed = {"sidebar", "addons", "settings", "toolbar", "workspace"}
         if location not in allowed or not callable(builder):
             raise ValueError(f"UI location must be one of {sorted(allowed)} and builder must be callable")
+        backend = str(backend).lower()
+        if backend != "tk":
+            raise ValueError("register_ui supports backend='tk'; use register_web_component for WebUI")
         self.ui_contributions.append({"addon": self.addon_name, "name": str(name),
             "label": str(label or name), "description": str(description),
-            "location": location, "builder": builder})
+            "location": location, "backend": backend, "builder": builder})
+
+    def register_web_component(self, name: str, *, html: str = "", css: str = "",
+                               javascript: str = "", location: str = "addons",
+                               label: str | None = None, description: str = ""):
+        """Register a trusted authenticated WebUI contribution.
+
+        Add-on authors should keep components self-contained and must not put
+        credentials or untrusted user data into executable markup/scripts.
+        Web components are mounted by the authenticated server WebUI; the same
+        add-on's tools, hooks and commands remain available to every interface.
+        """
+        allowed = {"sidebar", "addons", "settings", "toolbar", "workspace"}
+        if location not in allowed or not _NAME_RE.fullmatch(str(name)):
+            raise ValueError("web component requires a valid name and supported location")
+        if any(len(str(value)) > 128_000 for value in (html, css, javascript)):
+            raise ValueError("web component assets are limited to 128 KB each")
+        self.web_components.append({"addon": self.addon_name, "name": str(name),
+            "label": str(label or name), "description": str(description),
+            "location": location, "html": str(html), "css": str(css),
+            "javascript": str(javascript)})
 
     def register_service(self, name: str, implementation: Any, *, replaces: bool = False,
                          priority: int = 0, description: str = ""):
@@ -119,6 +152,7 @@ class AddonManager:
         self.commands: dict[str, dict] = {}
         self.actions: list[dict] = []
         self.ui_contributions: list[dict] = []
+        self.web_components: list[dict] = []
         self.services: dict[str, list[dict]] = {}
         self._loaded_modules = []
 
@@ -136,10 +170,16 @@ class AddonManager:
                 name = str(meta.get("name") or folder.name)
                 if not _NAME_RE.fullmatch(name):
                     raise ValueError("invalid add-on name")
+                api_version = int(meta.get("api_version", 1))
+                if api_version != 1:
+                    raise ValueError(f"unsupported add-on API version {api_version}; this build supports version 1")
+                permissions = meta.get("permissions", [])
+                if not isinstance(permissions, list) or any(not isinstance(x, str) for x in permissions):
+                    raise ValueError("permissions must be a list of strings")
                 found.append(AddonInfo(name=name, version=str(meta.get("version", "0.0.0")),
                     description=str(meta.get("description", "")),
                     author=str(meta.get("author", "Unknown")), path=str(folder),
-                    enabled=name not in self.disabled))
+                    enabled=name not in self.disabled, permissions=permissions, api_version=api_version))
             except Exception as exc:
                 found.append(AddonInfo(name=folder.name, path=str(folder), enabled=False,
                                        error=f"Invalid addon.json: {exc}"))
@@ -148,7 +188,7 @@ class AddonManager:
 
     def load(self):
         self.apis.clear(); self.schemas.clear(); self.callables.clear(); self.tool_identities.clear()
-        self.commands.clear(); self.actions.clear(); self.ui_contributions.clear()
+        self.commands.clear(); self.actions.clear(); self.ui_contributions.clear(); self.web_components.clear()
         self.services.clear(); self._loaded_modules.clear()
         for info in self.discover():
             if not info.enabled or info.error:
@@ -188,6 +228,7 @@ class AddonManager:
                     self.commands[name] = definition
                 self.actions.extend(api.actions)
                 self.ui_contributions.extend(api.ui_contributions)
+                self.web_components.extend(api.web_components)
                 for service in api.services:
                     self.services.setdefault(service["name"], []).append(service)
                 self.apis.append(api); self._loaded_modules.append(module)
@@ -211,11 +252,11 @@ class AddonManager:
             return implementation(app)
         return implementation
 
-    def build_ui(self, location: str, parent: Any, app: Any = None) -> list[Any]:
-        """Build all UI contributions for a placement; failures are isolated."""
+    def build_ui(self, location: str, parent: Any, app: Any = None, *, backend: str = "tk") -> list[Any]:
+        """Build UI contributions for a placement and frontend; failures are isolated."""
         built = []
         for item in list(self.ui_contributions):
-            if item["location"] != location:
+            if item["location"] != location or item.get("backend", "tk") != backend:
                 continue
             try:
                 widget = item["builder"](parent, app)
@@ -242,7 +283,115 @@ def create_addon_template(directory: Path, name: str, description: str = "") -> 
     folder = Path(directory) / name
     folder.mkdir(parents=True, exist_ok=False)
     (folder / "addon.json").write_text(json.dumps({"name": name, "version": "1.0.0",
-        "description": description, "author": ""}, indent=2) + "\n", encoding="utf-8")
+        "api_version": 1, "description": description, "author": "", "permissions": []}, indent=2) + "\n", encoding="utf-8")
     (folder / "addon.py").write_text('''"""Example Agent Code add-on."""\n\ndef register(api):\n    # Add tools, slash commands, lifecycle hooks, or UI actions here.\n    api.on("tools_loaded", on_tools_loaded)\n\n\ndef on_tools_loaded(**context):\n    # Keep hooks fast; do not block the UI thread.\n    return None\n''', encoding="utf-8")
     (folder / "README.md").write_text(f"# {name}\n\n{description}\n\nThis is a trusted Python extension. Review its code before enabling it.\n", encoding="utf-8")
     return folder
+
+
+# ---------------------------------------------------------------------------
+# Safe local add-on package management
+# ---------------------------------------------------------------------------
+
+import shutil
+import zipfile
+
+MAX_ADDON_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_ADDON_UNPACKED_BYTES = 64 * 1024 * 1024
+MAX_ADDON_FILES = 1500
+
+
+def _validate_addon_folder(folder: Path) -> dict:
+    folder = Path(folder)
+    manifest = folder / "addon.json"
+    entry = folder / "addon.py"
+    if not manifest.is_file() or not entry.is_file():
+        raise ValueError("Add-on package must contain addon.json and addon.py")
+    meta = json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(meta, dict):
+        raise ValueError("addon.json must contain a JSON object")
+    name = str(meta.get("name") or folder.name)
+    if not _NAME_RE.fullmatch(name):
+        raise ValueError("Invalid add-on name in addon.json")
+    files = 0; total = 0
+    for path in folder.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"Add-on packages cannot contain symlinks: {path.name}")
+        if path.is_file():
+            files += 1; total += path.stat().st_size
+            if files > MAX_ADDON_FILES or total > MAX_ADDON_UNPACKED_BYTES:
+                raise ValueError("Add-on folder exceeds file-count or expanded-size limits")
+    meta["name"] = name
+    return meta
+
+
+def install_addon_archive(archive: Path, addons_dir: Path, *, replace: bool = False) -> Path:
+    """Install a zip add-on after validating paths, size, and its manifest."""
+    archive, addons_dir = Path(archive), Path(addons_dir)
+    if archive.stat().st_size > MAX_ADDON_ARCHIVE_BYTES:
+        raise ValueError("Add-on archive exceeds the 32 MB download limit")
+    addons_dir.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="agent-code-addon-") as tmp:
+        staging = Path(tmp) / "unpacked"
+        staging.mkdir()
+        with zipfile.ZipFile(archive) as zf:
+            members = zf.infolist()
+            if len(members) > MAX_ADDON_FILES:
+                raise ValueError("Add-on archive contains too many files")
+            total = 0
+            for info in members:
+                name = info.filename.replace("\\", "/")
+                target = (staging / name).resolve()
+                if name.startswith("/") or ".." in Path(name).parts or staging.resolve() not in target.parents and target != staging.resolve():
+                    raise ValueError("Unsafe path in add-on archive")
+                total += int(info.file_size)
+                if total > MAX_ADDON_UNPACKED_BYTES:
+                    raise ValueError("Add-on archive expands beyond the 64 MB limit")
+            zf.extractall(staging)
+        # Accept either a package root or one enclosing directory.
+        roots = [staging] if (staging / "addon.json").exists() else [p for p in staging.iterdir() if p.is_dir()]
+        source = next((p for p in roots if (p / "addon.json").is_file() and (p / "addon.py").is_file()), None)
+        if source is None:
+            raise ValueError("Could not find addon.json and addon.py in the archive")
+        meta = _validate_addon_folder(source)
+        destination = addons_dir / meta["name"]
+        if destination.exists() and not replace:
+            raise FileExistsError(f"Add-on '{meta['name']}' is already installed")
+        backup = None
+        if destination.exists():
+            backup = addons_dir / (meta["name"] + ".backup")
+            if backup.exists(): shutil.rmtree(backup)
+            destination.rename(backup)
+        try:
+            shutil.copytree(source, destination)
+            _validate_addon_folder(destination)
+        except Exception:
+            if destination.exists(): shutil.rmtree(destination)
+            if backup and backup.exists(): backup.rename(destination)
+            raise
+        if backup and backup.exists(): shutil.rmtree(backup)
+        return destination
+
+
+def import_addon_directory(source: Path, addons_dir: Path, *, replace: bool = False) -> Path:
+    source, addons_dir = Path(source), Path(addons_dir)
+    meta = _validate_addon_folder(source)
+    destination = addons_dir / meta["name"]
+    if destination.exists() and not replace:
+        raise FileExistsError(f"Add-on '{meta['name']}' is already installed")
+    if destination.exists(): shutil.rmtree(destination)
+    addons_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination)
+    return destination
+
+
+def remove_addon(name: str, addons_dir: Path) -> bool:
+    if not _NAME_RE.fullmatch(str(name)):
+        raise ValueError("Invalid add-on name")
+    root = Path(addons_dir).resolve()
+    target = (root / name).resolve()
+    if target.parent != root or not target.is_dir():
+        return False
+    shutil.rmtree(target)
+    return True

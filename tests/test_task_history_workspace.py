@@ -70,3 +70,17 @@ def test_checkpoint_rejects_invalid_status_and_round_trips(tmp_path):
     loaded = history.get("d4")
     assert loaded is not None
     assert loaded.conversation == [{"role": "user", "content": "resume me"}]
+
+
+def test_agent_task_history_uuid_dependency_is_imported():
+    # Desktop task creation and streamed tool-call IDs both use uuid.uuid4().
+    # Verify the runtime module imports the dependency at module scope.
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).parents[1] / "src" / "agent_code" / "agent.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    assert any(
+        isinstance(node, ast.Import) and any(alias.name == "uuid" for alias in node.names)
+        for node in tree.body
+    )

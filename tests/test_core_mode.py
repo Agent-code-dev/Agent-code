@@ -48,3 +48,10 @@ def test_regular_agent_mode_keeps_its_extended_toolset():
     assert '"background_shell": self._guarded_background_shell' in src
     assert 'self._build_mcp_tools(self.all_schemas, self.all_callables)' in src
     assert 'load_skills(SKILLS_DIR, self.disabled_skills,' in src
+
+
+def test_core_prompt_teaches_podman_host_gateway_urls():
+    src = AGENT.read_text(encoding="utf-8")
+    assert "host.containers.internal:N" in src
+    assert "host http://localhost:3000 becomes container URL http://host.containers.internal:3000" in src
+    assert "Container localhost means the container itself" in src

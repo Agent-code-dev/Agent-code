@@ -41,3 +41,17 @@ class SkillStoreAuthFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_custom_https_store_server_is_persisted_and_used(tmp_path):
+    from unittest.mock import patch
+    cfg_file = tmp_path / "skill-store.json"
+    with patch.object(sm, "CONFIG_FILE", cfg_file):
+        cfg = sm.load_config()
+        cfg["server"] = "https://mirror.example.org/skills"
+        sm.save_config(cfg)
+        loaded = sm.load_config()
+        assert loaded["server"] == "https://mirror.example.org/skills"
+        with patch.object(sm, "_do_request", return_value={"ok": True}) as request:
+            assert sm.api("GET", "/skills", loaded) == {"ok": True}
+            assert request.call_args.args[0] == "https://mirror.example.org/skills"

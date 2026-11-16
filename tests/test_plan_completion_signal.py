@@ -13,5 +13,5 @@ def test_plan_completion_requires_explicit_signal():
 def test_finish_plan_is_available_only_in_plan_mode_requests():
     source = (Path(__file__).parents[1] / "src" / "agent_code" / "agent.py").read_text(encoding="utf-8")
     assert '"name": "finish_plan"' in source
-    assert 'if self.execution_mode == "build" else' in source
+    assert 'if self.execution_mode in ("build", "max") else' in source
     assert '!= "finish_plan"' in source

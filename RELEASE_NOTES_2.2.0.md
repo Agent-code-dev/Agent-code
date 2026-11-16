@@ -7,7 +7,7 @@
 - Hard safety exclusions remain non-overridable: ignore negation cannot make `.env`, credential, SSH, or other sensitive paths eligible for project discovery.
 - Added regression tests for ignore behavior and sensitive-file exclusions.
 - Added conservative test-command discovery for Python, Rust, Go, and Node projects. Node package scripts are never run automatically: they always require a direct approval, even in Auto permission mode.
-- Added GitHub Actions CI for automated testing. PyPI publishing and GitHub Releases remain manual.
+- Prepared GitHub Actions CI and tag-based release automation for GitHub Releases and PyPI Trusted Publishing.
 
 ## Versioning note
 

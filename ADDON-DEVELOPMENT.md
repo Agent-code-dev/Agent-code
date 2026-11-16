@@ -6,8 +6,10 @@ Add-ons are trusted Python extensions stored in the per-user `addons/<id>/` dire
 {
   "name": "my-extension",
   "version": "1.0.0",
+  "api_version": 1,
   "description": "Adds a custom workspace and alternate Skill Store client",
-  "author": "Developer"
+  "author": "Developer",
+  "permissions": ["network"]
 }
 ```
 
@@ -19,16 +21,21 @@ class AlternateSkillStore:
         ...
 
 
-def build_sidebar_button(parent, app):
+def build_classic_sidebar_button(parent, app):
     import customtkinter as ctk
     return ctk.CTkButton(parent, text="My workspace",
-                         command=lambda: app.log_line("Workspace opened", "dim"))
+        command=lambda: app.log_line("Workspace opened", "dim"))
 
 
 def register(api):
-    # Build arbitrary CustomTkinter widgets in supported application regions.
-    api.register_ui("my-workspace", build_sidebar_button,
-                    location="sidebar", label="My workspace")
+    # Classic CustomTkinter widget contribution.
+    api.register_ui("my-workspace", build_classic_sidebar_button,
+                    location="sidebar", label="My workspace", backend="tk")
+
+    # WebUI contribution.
+    api.register_web_component("workspace-card", location="addons",
+        label="My workspace", html="<p>Workspace extension is active.</p>")
+
 
     # Replace a named service when the relevant core integration opts in.
     api.register_service("skill_store", AlternateSkillStore(),
@@ -50,7 +57,7 @@ add-ons are therefore supported and remain bound to their own handlers.
 
 ## UI extension points
 
-`register_ui(name, builder, location=..., label=..., description=...)` supports `sidebar`, `addons`, `settings`, `toolbar`, and `workspace`. The builder receives `(parent, app)` and should return a Tk/CustomTkinter widget. The host places the returned widget. Keep builders fast and do not block the UI thread.
+`register_ui(name, builder, location=..., label=..., description=...)` supports `sidebar`, `addons`, `settings`, `toolbar`, and `workspace`. The builder receives `(parent, app)` and should return a widget for its backend. Use `backend="tk"` for CustomTkinter widgets. The authenticated WebUI uses the declarative `register_web_component(...)` API for HTML/CSS/JavaScript components. Web components are rendered by the server WebUI Add-ons panel; Tk widget contributions remain available in the CustomTkinter desktop. Keep builders fast and do not block the UI thread.
 
 ## Service extensions
 
@@ -60,4 +67,28 @@ Service names are explicit extension points, not arbitrary monkey-patching of co
 
 ## Trust and safety
 
-Python add-ons execute with the user's operating-system permissions. They are not sandboxed. Install only code you trust. A future add-on repository should support signatures, hashes, compatibility metadata, permission declarations and review before installation. Disabling an add-on prevents its code from being imported on the next load; it does not reverse changes an already-loaded add-on made outside the API.
+Python add-ons execute with the user's operating-system permissions. They are not sandboxed. Install only code you trust. The catalogue publishes SHA-256 hashes and the client verifies them when supplied. Publisher signatures are not implemented yet, and the server does not AI-review add-on code. Disabling an add-on prevents its code from being imported on the next load; it does not reverse changes an already-loaded add-on made outside the API. Declare requested capabilities in `addon.json` under `permissions`; this is informational metadata, not an OS sandbox or automatic permission enforcement.
+
+## Add-on installation and store
+
+Add-ons may be imported from a directory or installed from a ZIP containing `addon.json` and `addon.py` (at the archive root or in one enclosing directory). The desktop validates names, archive paths, file count, and expanded size before installation. Python add-ons are trusted executable code and are **not sandboxed**.
+
+The Add-on Store client uses the same configurable HTTPS server as the Skills Store. Agent Code 2.3.0's `server/skill-server.py` implements `GET /addons?search=...`, `GET /addons/{name}`, `GET /addons/{name}/download`, admin-only `POST /addons`, and admin-only `DELETE /addons/{name}`. Update the deployed Skills Store server to this version to enable the catalogue. Publishing requires the server admin token; downloads include a SHA-256 value that the client verifies when supplied.
+
+
+## Authenticated WebUI contributions
+
+```python
+def register(api):
+    api.register_web_component(
+        "status-card",
+        label="Status card",
+        description="A small status panel",
+        location="addons",
+        html='<div class="my-addon-status">Extension is active</div>',
+        css='.my-addon-status { padding: 12px; border-radius: 10px; }',
+        javascript='console.info("Example add-on component mounted")',
+    )
+```
+
+Web components are trusted extension code and can run JavaScript inside the authenticated browser session. Only install add-ons you trust. The agent's Python tools, commands and hooks remain shared across the authenticated WebUI, CustomTkinter and terminal interfaces.

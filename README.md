@@ -1,7 +1,27 @@
+## Installation
+
+Install Agent Code with one command:
+
+```bash
+pip install agent-code
+```
+
+Then launch the CustomTkinter desktop app with `agent-code`, or start the terminal interface with `agent-code tui`. The authenticated WebUI is separate and starts with `agent-code server`; it does not require a local desktop display.
+
+Upgrade later with:
+
+```bash
+pip install --upgrade agent-code
+```
+
+## Agent Code Server (browser access)
+
+Run `agent-code server` to start the same Agent Code workspace as a password-protected website. Open the printed URL from the host machine or another device on the same trusted network. The first run generates a one-time password and prints it in the server startup output; set your own credentials with `agent-code server --username myuser --set-password`. Choose a port with `--port 9000`. The server works on headless Linux, Windows and macOS, including the lightweight `pip install "agent-code[lite]"` option. See [`docs/server-mode.md`](docs/server-mode.md) for setup and security guidance. Do not expose the plain HTTP listener directly to the public internet; use a VPN or HTTPS reverse proxy.
+
 <p align="center">
   <img src="src/agent_code/data/icons/agent-code.png" width="145" alt="Agent Code Logo">
-</p><h1 align="center">Agent Code 2.2</h1><h3 align="center">⚡ Your AI coding agent. Your tools. Your environment.</h3><p align="center">
-  An open-source, extensible AI coding agent built with Python and CustomTkinter.
+</p><h1 align="center">Agent Code 2.3.0</h1><h3 align="center">⚡ Your AI coding agent. Your tools. Your environment.</h3><p align="center">
+  An open-source, extensible AI coding agent with a CustomTkinter desktop, authenticated WebUI server and terminal interfaces.
   <br>
   Build, modify, debug, and manage projects using AI — with customizable Skills, application Add-ons, and MCP integrations.
 </p><p align="center">
@@ -32,6 +52,18 @@
   <br>
   <sub>Python 3.10+ · OpenAI-compatible AI providers · Extensible architecture</sub>
 </p>---
+
+## Cross-distribution support
+
+Agent Code is a Python application and does not require a specific Linux distribution. Install it with pip on supported Python 3.10+ environments. The desktop uses CustomTkinter. The authenticated WebUI server is separate and does not require a desktop display. On headless systems, use the `lite` terminal-only install or the server command. Optional Podman setup detects common package managers and provides a manual-install path when a distribution uses another package manager.
+
+## Claude-compatible skills
+
+Agent Code supports instruction-only `SKILL.md` files from project `.claude/skills/`, user `~/.claude/skills/`, and the global Agent Code skills directory. These are loaded as instructions without executing Python. See [`docs/claude-skills.md`](docs/claude-skills.md).
+
+## Add-on Store
+
+The Skills Store server can also host Agent Code application add-ons. Configure the HTTPS store URL in Settings → Connections. Browse and install trusted add-ons from the desktop Add-on Store, or publish packages with the server administrator token. The server's add-on catalogue endpoints are admin-publish/public-download and include SHA-256 metadata; Python add-ons are executable code and are not sandboxed. See [`ADDON-DEVELOPMENT.md`](ADDON-DEVELOPMENT.md) and [`server/README.md`](server/README.md).
 
 🌟 What is Agent Code?
 
@@ -106,7 +138,9 @@ Hard safety exclusions (including `.env`, credential files, and SSH keys) cannot
 
 🎨 Desktop Workspace
 
-- CustomTkinter interface
+- CustomTkinter desktop interface
+
+- Markdown rendering with syntax highlighting
 
 - Chat-based development
 
@@ -304,25 +338,13 @@ Example manifest
 
 Example Add-on
 
-def build_sidebar_button(parent, app):
-    import customtkinter as ctk
-
-    return ctk.CTkButton(
-        parent,
-        text="My Workspace",
-        command=lambda: app.log_line(
-            "Workspace opened",
-            "dim"
-        )
-    )
-
-
+```python
 def register(api):
-    api.register_ui(
-        "my-workspace",
-        build_sidebar_button,
-        location="sidebar",
-        label="My Workspace"
+    api.register_web_component(
+        "workspace-card",
+        label="My Workspace",
+        location="addons",
+        html="<p>Workspace extension is active.</p>",
     )
 
     api.register_action(
@@ -482,7 +504,7 @@ Unknown SSH host keys are not silently trusted. Verify the host fingerprint befo
 
 Install the optional SSH dependency if required:
 
-python -m pip install paramiko
+python -m pip install --only-binary=:all: paramiko
 
 Only connect to machines you are authorized to administer.
 
@@ -565,7 +587,9 @@ If the operating-system credential store is unavailable, saving credentials fail
 
 🎨 Desktop Experience
 
-Agent Code uses Python and CustomTkinter for its desktop interface.
+Agent Code desktop launches with CustomTkinter. The WebUI is kept as a separate, authenticated server interface and is available with `agent-code server`; it does not launch as a local desktop window. The server serves the shared HTML/CSS/JavaScript frontend.
+
+See [`docs/ui-rebuild.md`](docs/ui-rebuild.md) for the WebUI page map, keyboard shortcuts, activity filtering, and workspace preview safety boundaries.
 
 The interface is organized around the development workspace.
 
@@ -578,7 +602,10 @@ Workspace features
 - MCP configuration.
 - API and model settings.
 - Help and documentation.
-- Task status and activity information.
+- Task status, plans, history recovery, and checkpoint review.
+- Persistent project blueprint editor.
+- Workspace file browsing and text previews.
+- Provider profile management.
 
 Activity Details
 
@@ -624,89 +651,29 @@ Review file changes and restore conflicts before applying recovery actions.
 
 📥 Installation
 
-Requirements
+Install from PyPI:
 
-- Python 3.10 or newer.
-- Tkinter.
-- CustomTkinter.
-- Internet access for remote AI providers.
-- A compatible browser for browser automation.
+```bash
+pip install agent-code
+```
 
-Optional features require their respective dependencies.
+Launch Agent Code:
 
-Install from PyPI
+```bash
+agent-code
+```
 
-The recommended installation method:
+For a terminal session or headless computer:
 
-python -m pip install --upgrade pip
-python -m pip install agent-code
+```bash
+agent-code tui
+```
 
 Upgrade:
 
-python -m pip install --upgrade agent-code
-
-Ubuntu / Debian
-
-Install the required system components:
-
-sudo apt update
-
-sudo apt install \
-    python3 \
-    python3-venv \
-    python3-tk \
-    chromium \
-    podman
-
-Podman is optional unless you want the Linux sandbox.
-
-Create a virtual environment:
-
-python3 -m venv .venv
-
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-
-python -m pip install agent-code
-
-Windows
-
-Install Python 3.10 or newer with Tcl/Tk support.
-
-Install a compatible Chromium-based browser for browser automation.
-
-Then:
-
-python -m pip install agent-code
-
-macOS
-
-Install Python 3.10 or newer with Tcl/Tk support.
-
-Install a compatible Chromium-based browser.
-
-Then:
-
-python3 -m pip install agent-code
-
-Install from source
-
-git clone https://github.com/agent-code-dev/agent-code.git
-
-cd agent-code
-
-python -m venv .venv
-
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-
-python -m pip install .
-
-On Windows, activate the virtual environment using:
-
-.venv\Scripts\activate
+```bash
+pip install --upgrade agent-code
+```
 
 ---
 
@@ -890,9 +857,9 @@ source .venv/bin/activate
 
 Install the project:
 
-python -m pip install --upgrade pip
+python -m pip install --only-binary=:all: --upgrade pip
 
-python -m pip install -e .
+python -m pip install --only-binary=:all: -e .
 
 Run tests:
 
@@ -900,7 +867,7 @@ python -m pytest -q
 
 Build distribution packages:
 
-python -m pip install build
+python -m pip install --only-binary=:all: build
 
 python -m build
 

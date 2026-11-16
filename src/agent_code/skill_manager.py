@@ -21,7 +21,18 @@ import urllib.parse
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
 import tkinter as tk
-import customtkinter as ctk
+try:
+    import customtkinter as ctk
+except ImportError:
+    class _ClassicUiUnavailable:
+        class CTkFrame:
+            def __init__(self, *_args, **_kwargs):
+                raise RuntimeError("The Skill Store desktop requires agent-code[classic-ui].")
+        def __getattr__(self, _name):
+            def unavailable(*_args, **_kwargs):
+                raise RuntimeError("The Skill Store desktop requires agent-code[classic-ui].")
+            return unavailable
+    ctk = _ClassicUiUnavailable()
 
 
 # ---------------------------------------------------------------------------
@@ -72,13 +83,15 @@ def load_config() -> dict:
             cfg.update(json.loads(CONFIG_FILE.read_text(encoding="utf-8")))
         except Exception:
             pass
-    cfg["server"] = DEFAULT_SERVER
+    server = str(cfg.get("server") or DEFAULT_SERVER).strip().rstrip("/")
+    cfg["server"] = server if server.startswith("https://") else DEFAULT_SERVER
     return cfg
 
 
 def save_config(cfg: dict):
     out = {k: cfg.get(k) for k in DEFAULT_CONFIG.keys()}
-    out["server"] = DEFAULT_SERVER
+    server = str(cfg.get("server") or DEFAULT_SERVER).strip().rstrip("/")
+    out["server"] = server if server.startswith("https://") else DEFAULT_SERVER
     CONFIG_FILE.write_text(json.dumps(out, indent=2), encoding="utf-8")
     try:
         CONFIG_FILE.chmod(0o600)
@@ -220,10 +233,12 @@ def _do_request(server, method, path, cfg, body, auth):
 
 def api(method, path, cfg, body=None, auth=False):
     errors = []
-    for server in SKILL_SERVERS:
+    selected = str((cfg or {}).get("server") or DEFAULT_SERVER).strip().rstrip("/")
+    servers = [selected] if selected.startswith("https://") else [DEFAULT_SERVER]
+    for server in servers:
         try:
             result = _do_request(server, method, path, cfg, body, auth)
-            if server != SKILL_SERVERS[0]:
+            if server != selected:
                 print(f"  [fallback] responded via {server}")
             return result
         except _FallbackNeeded as e:
@@ -425,7 +440,7 @@ class LoginDialog(ctk.CTkFrame):
             font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=24, pady=(24, 3))
         ctk.CTkLabel(card, text="Sign in to your account or create a new one",
             text_color=FG_DIM, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=24, pady=(0, 4))
-        ctk.CTkLabel(card, text=DEFAULT_SERVER, text_color=ACCENT,
+        ctk.CTkLabel(card, text=self.cfg.get("server", DEFAULT_SERVER), text_color=ACCENT,
             font=ctk.CTkFont(size=10)).pack(anchor="w", padx=24, pady=(0, 18))
         body = ctk.CTkFrame(card, fg_color="transparent")
         body.pack(fill="x", padx=24)

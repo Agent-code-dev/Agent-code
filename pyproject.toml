@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-code"
-version = "2.2.0"
+version = "2.3.0"
 description = "Local AI agent with optional browser automation, sandboxed shell, and plug-and-play skills"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,8 +31,11 @@ classifiers = [
 
 dependencies = [
     "openai>=1.0.0",
-    "customtkinter>=5.2.2",
+    # Keep GTK bindings out of pip resolution: PyGObject/PyCairo are distro-provided
+    # prebuilt runtime packages on Linux, never pip source builds.
+    "customtkinter>=5.2.2; extra != 'lite'",
     "markdown-it-py>=3.0.0",
+    "Pygments>=2.17.0",
     "mcp>=1.9,<2",
     "keyring>=24.2",
     "paramiko>=3.4.0",
@@ -40,7 +43,13 @@ dependencies = [
     "DrissionPage>=4.1.1.4",
     "selenium>=4.20.0",
     "textual>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
 ]
+
+[project.optional-dependencies]
+lite = []
+classic-ui = []
 
 [project.urls]
 Homepage   = "https://agent-code-dev.github.io"
@@ -63,6 +72,9 @@ agent_code = [
     "data/skills/*/*.md",
     "data/icons/*.png",
     "data/icons/*.ico",
+    "web_ui/*.html",
+    "web_ui/*.css",
+    "web_ui/*.js",
 ]
 [tool.pytest.ini_options]
 pythonpath = ["src"]

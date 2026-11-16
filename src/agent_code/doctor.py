@@ -122,12 +122,21 @@ def collect_diagnostics() -> dict[str, Any]:
     checks: list[dict[str, str]] = []
     checks.append(_check("Python", sys.version_info >= (3, 10), platform.python_version(),
                          "ok" if sys.version_info >= (3, 10) else "error"))
-    checks.append(_check("Operating system", True, f"{platform.system()} {platform.release()}"))
+    os_detail = f"{platform.system()} {platform.release()}"
+    if sys.platform.startswith("linux"):
+        try:
+            from .platform_support import distribution_info
+            distro = distribution_info()
+            os_detail += " · " + (distro.get("name") or distro.get("id") or "Linux distribution")
+        except Exception:
+            pass
+    checks.append(_check("Operating system", True, os_detail))
 
-    for module, label in (("customtkinter", "CustomTkinter GUI"), ("DrissionPage", "Browser automation"),
+    for module, label in (("customtkinter", "CustomTkinter desktop"),
+                          ("DrissionPage", "Browser automation"),
                           ("openai", "OpenAI-compatible API client"), ("markdown_it", "Markdown rendering")):
         found = importlib.util.find_spec(module) is not None
-        required = module in ("customtkinter", "DrissionPage", "openai")
+        required = module in ("DrissionPage", "openai")
         checks.append(_check(label, found, "installed" if found else "not installed",
                              "ok" if found else ("error" if required else "warning")))
 

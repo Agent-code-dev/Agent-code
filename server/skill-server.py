@@ -96,7 +96,10 @@ QUARANTINE.mkdir(exist_ok=True)
 
 TOKEN_TTL = 30 * 24 * 3600
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 5 * 1024 * 1024))
+MAX_ADDON_UPLOAD_BYTES = int(os.environ.get("MAX_ADDON_UPLOAD_BYTES", 32 * 1024 * 1024))
 MAX_STATE_BYTES = int(os.environ.get("MAX_STATE_BYTES", 5 * 1024 * 1024))
+ADDON_STORAGE = STORAGE / "addons"
+ADDON_STORAGE.mkdir(parents=True, exist_ok=True)
 
 # Max time we'll wait for a 429 rate limit to clear before giving up.
 MAX_RETRY_WAIT = int(os.environ.get("MAX_RETRY_WAIT", "90"))
@@ -198,6 +201,18 @@ def init_db():
             ai_verdict  TEXT NOT NULL DEFAULT 'safe',
             ai_summary  TEXT NOT NULL DEFAULT '',
             ai_reasons  TEXT NOT NULL DEFAULT '[]',
+            created     REAL NOT NULL,
+            updated     REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS addons (
+            name        TEXT PRIMARY KEY,
+            description TEXT NOT NULL DEFAULT '',
+            version     TEXT NOT NULL,
+            author      TEXT NOT NULL DEFAULT 'Agent Code Admin',
+            zip_path    TEXT NOT NULL,
+            sha256      TEXT NOT NULL,
+            size_bytes  INTEGER NOT NULL DEFAULT 0,
+            downloads   INTEGER NOT NULL DEFAULT 0,
             created     REAL NOT NULL,
             updated     REAL NOT NULL
         );
@@ -738,6 +753,15 @@ class Handler(BaseHTTPRequestHandler):
         obj.update(extra)
         self._json(code, obj)
 
+    def _binary(self, code, blob, filename):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(blob)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(blob)
+
     def _throttled(self):
         if not _ddos_hit(self.client_address[0]):
             self._json(429, {"error": "rate limited"})
@@ -758,6 +782,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.rstrip("/") or "/"
         if path == "/state":
             limit = MAX_STATE_BYTES
+        elif path == "/addons":
+            limit = MAX_ADDON_UPLOAD_BYTES * 2
         elif path == "/report":
             limit = 16 * 1024
         else:
@@ -824,6 +850,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/skills":
                 return self._handle_list_skills(qs)
 
+            if path == "/addons":
+                return self._handle_list_addons(qs)
+            m = re.match(r"^/addons/([^/]+)/download$", path)
+            if m:
+                return self._handle_addon_download(m.group(1))
+
+            m = re.match(r"^/addons/([^/]+)$", path)
+            if m:
+                return self._handle_show_addon(m.group(1))
+
             m = re.match(r"^/skills/([^/]+)/download$", path)
             if m:
                 return self._handle_download(m.group(1))
@@ -860,6 +896,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/login":    return self._handle_login()
             if path == "/logout":   return self._handle_logout()
             if path == "/skills":   return self._handle_publish()
+            if path == "/addons":
+                if not self._admin(): return self._err(403, "admin only")
+                return self._handle_addon_publish()
             if path == "/state":    return self._handle_state_post()
             if path == "/report":   return self._handle_report()
 
@@ -889,6 +928,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlparse(self.path).path.rstrip("/") or "/"
         try:
+            m = re.match(r"^/addons/([^/]+)$", path)
+            if m:
+                if not self._admin(): return self._err(403, "admin only")
+                return self._handle_addon_delete(m.group(1))
             m = re.match(r"^/skills/([^/]+)$", path)
             if m:
                 return self._handle_delete(m.group(1))
@@ -898,6 +941,104 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             log(f"ERROR DELETE {path}")
             return self._err(500, "internal server error")
+
+    # ---- application add-on catalogue ----
+
+    def _handle_list_addons(self, qs):
+        search = (qs.get("search", [""])[0] or "").strip().lower()
+        with _db_lock:
+            conn = db()
+            if search:
+                rows = conn.execute(
+                    "SELECT name, description, version, author, sha256, size_bytes, downloads, updated "
+                    "FROM addons WHERE lower(name) LIKE ? OR lower(description) LIKE ? ORDER BY updated DESC",
+                    (f"%{search}%", f"%{search}%")).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT name, description, version, author, sha256, size_bytes, downloads, updated "
+                    "FROM addons ORDER BY updated DESC").fetchall()
+            conn.close()
+        return self._json(200, {"addons": [dict(row) for row in rows]})
+
+    def _handle_show_addon(self, name):
+        with _db_lock:
+            conn = db()
+            row = conn.execute("SELECT name, description, version, author, sha256, size_bytes, downloads, created, updated FROM addons WHERE name=?", (name,)).fetchone()
+            conn.close()
+        if not row: return self._err(404, f"add-on '{name}' not found")
+        return self._json(200, {"addon": dict(row)})
+
+    def _handle_addon_download(self, name):
+        with _db_lock:
+            conn = db()
+            row = conn.execute("SELECT name, zip_path FROM addons WHERE name=?", (name,)).fetchone()
+            if row:
+                conn.execute("UPDATE addons SET downloads=downloads+1 WHERE name=?", (name,))
+                conn.commit()
+            conn.close()
+        if not row: return self._err(404, f"add-on '{name}' not found")
+        path = Path(row["zip_path"]).resolve()
+        if ADDON_STORAGE.resolve() not in path.parents or not path.is_file():
+            return self._err(500, "stored add-on archive missing or outside storage")
+        return self._binary(200, path.read_bytes(), path.name)
+
+    def _handle_addon_publish(self):
+        data = self._read_json()
+        name = str(data.get("name") or "").strip()
+        version = str(data.get("version") or "1.0.0").strip()
+        description = str(data.get("description") or "").strip()[:2000]
+        author = str(data.get("author") or "Agent Code Admin").strip()[:120]
+        if not NAME_RE.fullmatch(name): return self._err(400, "invalid add-on name")
+        if not VER_RE.fullmatch(version): return self._err(400, "invalid add-on version")
+        try:
+            blob = base64.b64decode(data.get("zip_b64", ""), validate=True)
+        except Exception:
+            return self._err(400, "invalid base64 add-on archive")
+        if not blob or len(blob) > MAX_ADDON_UPLOAD_BYTES:
+            return self._err(400, "add-on archive is empty or exceeds upload limit")
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                infos = zf.infolist()
+                if len(infos) > 1500: return self._err(400, "archive contains too many files")
+                total = 0; files = {}
+                for info in infos:
+                    entry = info.filename.replace("\\", "/")
+                    parts = Path(entry).parts
+                    if entry.startswith("/") or ".." in parts or re.match(r"^[A-Za-z]:", entry) or ((info.external_attr >> 16) & 0o170000) == 0o120000:
+                        return self._err(400, "unsafe path or symlink in add-on archive")
+                    total += info.file_size
+                    if total > 64 * 1024 * 1024: return self._err(400, "archive expands beyond 64 MiB")
+                    if not info.is_dir() and Path(entry).name in ("addon.json", "addon.py"):
+                        files[Path(entry).name] = zf.read(info)
+                if "addon.json" not in files or "addon.py" not in files:
+                    return self._err(400, "archive must contain addon.json and addon.py")
+                manifest = json.loads(files["addon.json"].decode("utf-8"))
+                if str(manifest.get("name") or "") != name:
+                    return self._err(400, "manifest name must match submitted add-on name")
+        except (zipfile.BadZipFile, UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+            return self._err(400, f"invalid add-on archive: {exc}")
+        digest = hashlib.sha256(blob).hexdigest()
+        destination = ADDON_STORAGE / f"{name}.zip"
+        temp = destination.with_suffix(".zip.tmp")
+        temp.write_bytes(blob); os.replace(temp, destination)
+        now = time.time()
+        with _db_lock:
+            conn = db()
+            conn.execute("INSERT INTO addons (name, description, version, author, zip_path, sha256, size_bytes, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description=excluded.description, version=excluded.version, author=excluded.author, zip_path=excluded.zip_path, sha256=excluded.sha256, size_bytes=excluded.size_bytes, updated=excluded.updated",
+                         (name, description, version, author, str(destination), digest, len(blob), now, now))
+            conn.commit(); conn.close()
+        return self._json(201, {"ok": True, "name": name, "version": version, "sha256": digest, "size_bytes": len(blob)})
+
+    def _handle_addon_delete(self, name):
+        with _db_lock:
+            conn = db(); row = conn.execute("SELECT zip_path FROM addons WHERE name=?", (name,)).fetchone()
+            if row: conn.execute("DELETE FROM addons WHERE name=?", (name,)); conn.commit()
+            conn.close()
+        if not row: return self._err(404, f"add-on '{name}' not found")
+        path = Path(row["zip_path"]).resolve()
+        if ADDON_STORAGE.resolve() in path.parents:
+            path.unlink(missing_ok=True)
+        return self._json(200, {"ok": True, "deleted": name})
 
     # ---- auth ----
 

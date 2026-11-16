@@ -222,8 +222,11 @@ def resolve_model_profile(provider: str = "", model: str = "", base_url: str = "
 
 
 
-def protocol_request_options(profile: dict[str, Any], *, has_tools: bool) -> dict[str, Any]:
-    """Return only request parameters known to be supported by this profile."""
+def protocol_request_options(profile: dict[str, Any], *, has_tools: bool, thinking_effort: str = "off", model: str = "", base_url: str = "") -> dict[str, Any]:
+    """Return request parameters supported by the selected provider/model.
+
+    Reasoning controls are opt-in and are never sent to unknown endpoints.
+    """
     options: dict[str, Any] = {}
     choices = set(profile.get("tool_choice_modes") or ())
     if has_tools and "auto" in choices:
@@ -233,6 +236,15 @@ def protocol_request_options(profile: dict[str, Any], *, has_tools: bool) -> dic
     parallel = profile.get("parallel_tool_calls")
     if has_tools and parallel is not None:
         options["parallel_tool_calls"] = bool(parallel)
+    effort = str(thinking_effort or "off").lower()
+    if effort in {"low", "medium", "high"}:
+        provider = str(profile.get("provider", "")).lower()
+        model_id = str(model or "").lower()
+        endpoint = str(base_url or "").lower()
+        if provider == "openai" and (model_id.startswith(("gpt-5", "o1", "o3", "o4"))):
+            options["reasoning_effort"] = effort
+        elif "openrouter.ai" in endpoint:
+            options["reasoning"] = {"effort": effort}
     return options
 
 

@@ -1,9 +1,10 @@
 """Monitor-free terminal interface for Agent Code. Uses only terminal UI APIs."""
 from __future__ import annotations
-import curses, json, os, platform, queue, shutil, subprocess, textwrap, threading, time, uuid, re, unicodedata
+import curses, json, os, platform, queue, shutil, subprocess, textwrap, threading, time, uuid, re, unicodedata, sys
 from pathlib import Path
 from . import __version__
 from . import paths
+from .blueprint import BlueprintStore
 from .model_protocols import (resolve_model_profile, protocol_request_options,
                               parse_minimax_text_tool_calls, MiniMaxStreamTextFilter,
                               reasoning_payload)
@@ -43,21 +44,30 @@ def api_keys(cfg):
 
 class TUI:
     def __init__(self, screen):
-        self.s=screen; self.cfg=read_config(); self.messages=[]; self.notice="Welcome. Press ? for help."; self.mode="Build"
+        self.s=screen; self.cfg=read_config(); self.messages=[]; self.notice="Welcome. Press ? for help."; self.settings_selection=0
+        self.mode={"plan": "Plan", "build": "Build", "max": "Max"}.get(str(self.cfg.get("execution_mode", "build")), "Build")
+        self.input=""; self.scroll=0; self.cwd="."; self.page="Chat"; self.task_selection=0; self.task_detail_id=None; self.running=True; self.busy=False; self.cancel_event=threading.Event(); self.events=queue.Queue(); self.activity=["Ready — send a task to watch agent progress."]; self.tool_details=[]; self.activity_scroll=0; self.stream_text=""
         from .interactive import AskUserBroker
         self.ask_user_broker = AskUserBroker(on_question=lambda event: self.events.put(("ask_user", event)))
-        self.input=""; self.scroll=0; self.cwd="."; self.page="Chat"; self.task_selection=0; self.task_detail_id=None; self.running=True; self.busy=False; self.cancel_event=threading.Event(); self.events=queue.Queue(); self.activity=["Ready — send a task to watch agent progress."]; self.tool_details=[]; self.activity_scroll=0; self.stream_text=""
         curses.curs_set(1); curses.start_color(); curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_CYAN, -1); curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)
-        curses.init_pair(3, curses.COLOR_GREEN, -1); curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        # Monochrome terminal palette; rely on weight/placement, not neon colors.
+        curses.init_pair(1, curses.COLOR_WHITE, -1)
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        curses.init_pair(3, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_WHITE, -1)
         self.s.keypad(True); self.s.timeout(150); self.draw()
     def safe_add(self,y,x,text,attr=0,width=None):
-        h,w=self.s.getmaxyx()
+        try:
+            h, w = self.s.getmaxyx()
+        except (curses.error, OSError, AttributeError):
+            return
         if y<0 or y>=h or x<0 or x>=w: return
         columns = max(0, min(w - x - 1, width if width is not None else w - x - 1))
         text = self._clip_columns(str(text), columns)
         try: self.s.addstr(y,x,text,attr)
-        except curses.error: pass
+        except (curses.error, UnicodeError, OSError, TypeError):
+            # Terminal resize/encoding errors should never terminate the agent.
+            pass
 
     @staticmethod
     def _char_width(char):
@@ -169,22 +179,32 @@ class TUI:
         return value.strip() or "(The provider returned no displayable text.)"
 
     def draw(self):
-        self.s.erase(); h,w=self.s.getmaxyx()
+        try:
+            self.s.erase()
+            h, w = self.s.getmaxyx()
+        except (curses.error, OSError, AttributeError):
+            return
+        if h < 4 or w < 8:
+            try:
+                self.s.refresh()
+            except (curses.error, OSError):
+                pass
+            return
         self.safe_add(0,0," AGENT CODE  "+__version__+"  ◆  TERMINAL WORKSPACE ",curses.color_pair(2),w-1)
         sidebar=max(19,min(25,w//4)) if w >= 72 else 0
         content=sidebar+2 if sidebar else 1
         if sidebar:
             self.safe_add(2,1,"NAVIGATION",curses.color_pair(1)|curses.A_BOLD)
-            for i,name in enumerate(["Chat","Workspace","Tasks","Activity","Skills","MCP","Settings","Add-ons","Help"]):
+            for i,name in enumerate(["Chat","Workspace","Tasks","Activity","Skills","MCP","Settings","Add-ons","Add-on Store","Help"]):
                 self.safe_add(4+i,2,("▸ " if name==self.page else "  ")+name,curses.A_BOLD if name==self.page else 0)
-            self.safe_add(12,1,"WORKSPACE",curses.color_pair(1)|curses.A_BOLD)
-            self.safe_add(13,1,str(WORKSPACE)[-max(1,sidebar-2):])
-            self.safe_add(15,1,"MODE",curses.color_pair(1)|curses.A_BOLD)
-            self.safe_add(16,2,"["+self.mode+"]  (F2 to toggle)")
+            self.safe_add(15,1,"WORKSPACE",curses.color_pair(1)|curses.A_BOLD)
+            self.safe_add(16,1,str(WORKSPACE)[-max(1,sidebar-2):])
+            self.safe_add(18,1,"MODE",curses.color_pair(1)|curses.A_BOLD)
+            self.safe_add(19,2,"["+self.mode+"]  (F2 to toggle)")
             for y in range(1,h-2): self.safe_add(y,sidebar,"│")
         else:
-            self.safe_add(1,1,"1 Chat  2 Workspace  3 Tasks  4 Activity  5 Skills  6 MCP  7 Settings  8 Add-ons  9 Help",curses.A_DIM)
-        title={"Chat":"Chat / Agent","Workspace":"Workspace Explorer","Tasks":"Task Workspace / History","Activity":"Live Agent Activity / Mini IDE","Skills":"Installed Skills","MCP":"Remote MCP","Settings":"Provider Settings","Add-ons":"Application Add-ons","Help":"Keyboard Shortcuts"}.get(self.page,self.page)
+            self.safe_add(1,1,"1 Chat 2 Files 3 Tasks 4 Activity 5 Skills 6 MCP 7 Settings 8 Add-ons 9 Store 0 Help",curses.A_DIM)
+        title={"Chat":"Chat / Agent","Workspace":"Workspace Explorer","Tasks":"Task Workspace / History","Activity":"Live Agent Activity / Mini IDE","Skills":"Installed Skills","MCP":"Remote MCP","Settings":"Provider Settings","Add-ons":"Application Add-ons","Add-on Store":"Browse and Install Add-ons","Help":"Keyboard Shortcuts"}.get(self.page,self.page)
         self.safe_add(2,content,title,curses.color_pair(1)|curses.A_BOLD)
         self.safe_add(h-1,0, ("Provider: "+str(self.cfg.get("provider_name", "OpenAI"))+"  •  "+self.notice)[:max(1,w-1)], curses.A_DIM)
         if self.page=="Chat":
@@ -267,12 +287,18 @@ class TUI:
             self.safe_add(h-3,content,"Full activity and tool details. Press 1 for Chat.",curses.A_DIM)
         elif self.page=="Skills":
             from .loader import discover_skills
+            from .claude_skills import discover_claude_skills
             skills=discover_skills(paths.global_skills_dir())
+            claude=discover_claude_skills([Path.cwd()/".claude"/"skills",Path.home()/".claude"/"skills",paths.global_skills_dir()])
+            combined=[(x,"python") for x in skills]+[(x,"claude") for x in claude]
             disabled=set(self.cfg.get("disabled_skills", []))
-            self.safe_add(4,content,f"Installed skills: {len(skills)}  ·  Enabled: {sum(s['name'] not in disabled for s in skills)}")
-            for i,item in enumerate(skills[:max(1,h-9)]):
-                state="ON" if item["name"] not in disabled else "OFF"
-                self.safe_add(5+i,content,f"[{state}] {item['name']} — {item.get('description','')}")
+            enabled=sum(x["name"] not in disabled and ("claude:"+x["name"] not in disabled if kind=="claude" else True) for x,kind in combined)
+            self.safe_add(4,content,f"Installed skills: {len(combined)}  ·  Enabled: {enabled}")
+            for i,(item,kind) in enumerate(combined[:max(1,h-9)]):
+                key="claude:"+item["name"] if kind=="claude" else item["name"]
+                state="ON" if item["name"] not in disabled and key not in disabled else "OFF"
+                label="Claude SKILL.md" if kind=="claude" else "Python skill"
+                self.safe_add(5+i,content,f"[{state}] {item['name']} ({label}) — {item.get('description','')}")
             self.safe_add(h-4,content,"t Toggle selected skill  ·  i Install bundled skills  ·  m Open Skill Store (GUI)",curses.A_DIM)
             self.safe_add(h-3,content,"Press t to choose a skill and toggle its enabled state.",curses.A_DIM)
         elif self.page=="MCP":
@@ -286,7 +312,23 @@ class TUI:
             self.safe_add(h-5,content,"a Add  e Edit  t Toggle enabled  d Delete  c Connect/test  (choose number first)",curses.A_DIM)
             self.safe_add(h-4,content,"MCP headers are stored in agent_config.json; avoid sharing that file.",curses.A_DIM)
         elif self.page=="Settings":
-            for i,line in enumerate([f"Provider: {self.cfg.get('provider_name','OpenAI')}",f"Base URL: {self.cfg.get('openai_base_url') or PROVIDERS.get(self.cfg.get('provider_name','OpenAI'),'') or '(not set)'}",f"Model: {self.cfg.get('openai_model') or '(not selected)'}",f"API key: {'configured' if api_keys(self.cfg) else 'not configured'}","p: select provider + URL   m: fetch model list   k: set API key"]): self.safe_add(4+i,content,line)
+            settings = self._settings_rows()
+            self.safe_add(4, content, "SETTINGS  ·  ↑/↓ select  Enter edit  ·  Esc back", curses.A_DIM)
+            visible_rows = max(1, h - 9)
+            start = max(0, min(self.settings_selection - visible_rows + 1, max(0, len(settings) - visible_rows)))
+            for i, (key, label, value, hint) in enumerate(settings[start:start + visible_rows]):
+                selected = start + i == self.settings_selection
+                attr = curses.A_REVERSE if selected else 0
+                self.safe_add(6 + i, content, f"{label:<23} {value}", attr)
+                if selected and h > 9:
+                    self.safe_add(h - 3, content, hint, curses.A_DIM)
+            self.safe_add(h - 2, content, "p Provider  m Models  k API key  e Edit selected  r Reasoning  u Desktop UI", curses.A_DIM)
+        elif self.page=="Add-on Store":
+            self.safe_add(4, content, "ADD-ON STORE", curses.color_pair(1) | curses.A_BOLD)
+            self.safe_add(6, content, "Browse the configured HTTPS catalogue and install a verified add-on.")
+            self.safe_add(8, content, "Press Enter or s to search the store and choose an add-on to install.")
+            self.safe_add(10, content, "Store server: " + str(self.cfg.get("skill_store_server", "https://skills-manager.freesrv.com")))
+            self.safe_add(12, content, "Installed add-ons are managed from the Add-ons page.", curses.A_DIM)
         elif self.page=="Add-ons":
             from .addons import AddonManager
             manager=AddonManager(paths.global_addons_dir(), self.cfg.get("disabled_addons", []))
@@ -296,11 +338,79 @@ class TUI:
             for i,item in enumerate(infos[:max(1,h-9)]):
                 state="ON" if item.enabled else "OFF"
                 self.safe_add(5+i,content,f"[{state}] {item.name} v{item.version} — {item.error or item.description}")
-            self.safe_add(h-4,content,"t Toggle selected add-on  ·  n Create starter add-on  ·  o Open add-on folder",curses.A_DIM)
+            self.safe_add(h-4,content,"t Toggle selected add-on  ·  n Create starter add-on  ·  o Open folder  ·  s Store",curses.A_DIM)
             self.safe_add(h-3,content,"Add-ons are trusted Python extensions; review addon.py before enabling.",curses.A_DIM)
         else:
-            for i,line in enumerate(["Tab: cycle pages","1-9: Chat, Workspace, Tasks, Activity, Skills, MCP, Settings, Add-ons, Help","Enter: send message; !command: run a shell command directly", "F5 or Ctrl+C: stop current agent task", "Ctrl+L or /clear: clear chat", "i: install Podman sandbox runtime","F2: toggle Plan / Build mode","p: choose provider and model (Settings)","m: fetch available models (Settings)","k: configure API key","Skills: t toggle selected; i install bundled skills","Add-ons: t toggle selected; n create template","MCP page: a add, e edit, t toggle, d delete, c connect/test","F10: quit","The terminal UI works over SSH without a monitor or desktop session."]): self.safe_add(4+i,content,line)
-        self.s.refresh()
+            for i,line in enumerate(["Tab: cycle pages","1-10: Chat, Workspace, Tasks, Activity, Skills, MCP, Settings, Add-ons, Add-on Store, Help","Enter: send message; !command: run a shell command directly", "F5 or Ctrl+C: stop current agent task", "Ctrl+L or /clear: clear chat", "i: install Podman sandbox runtime","F2: cycle Plan / Build / Max mode","p: choose provider and model (Settings)","m: fetch available models (Settings)","k: configure API key","Skills: t toggle selected; i install bundled skills","Add-ons: t toggle; n create; Add-on Store page: Enter/s browse catalogue","Settings: arrows + Enter edit; p provider; m models; k API key; r reasoning","MCP page: a add, e edit, t toggle, d delete, c connect/test","F10: quit","The terminal UI works over SSH without a monitor or desktop session."]): self.safe_add(4+i,content,line)
+        try:
+            self.s.refresh()
+        except (curses.error, OSError):
+            pass
+    def _settings_rows(self):
+        provider = str(self.cfg.get("provider_name", "OpenAI"))
+        base = str(self.cfg.get("openai_base_url") or PROVIDERS.get(provider, "") or "(not set)")
+        key_state = f"{len(api_keys(self.cfg))} key(s) configured" if api_keys(self.cfg) else "not configured"
+        mode = str(self.cfg.get("execution_mode", "build")).upper()
+        permission = str(self.cfg.get("permission_mode", self.cfg.get("shell_permission_mode", "ask")))
+        effort = str(self.cfg.get("thinking_effort", "off")).upper()
+        podman = "Enabled" if self.cfg.get("podman_sandbox_enabled", False) else "Disabled"
+        container = str(self.cfg.get("podman_container_name") or "Managed/default")
+        activity = "Detailed" if self.cfg.get("show_activity_details", True) else "Compact"
+        store = str(self.cfg.get("skill_store_server", "https://skills-manager.freesrv.com"))
+        return [
+            ("provider", "AI provider", provider, "Choose a provider and configure its endpoint."),
+            ("base", "API base URL", base, "Set the OpenAI-compatible API endpoint."),
+            ("model", "Model ID", str(self.cfg.get("openai_model") or "Not selected"), "Enter a model ID or fetch models from the provider."),
+            ("key", "API keys", key_state, "Add or replace the API key; input is hidden."),
+            ("mode", "Execution mode", mode, "Choose Plan, Build, or Max."),
+            ("permission", "Permission policy", permission, "Choose ask, workspace auto-approve, or read-only."),
+            ("thinking", "Thinking effort", effort, "Choose Off, Low, Medium, or High where supported."),
+            ("activity", "Activity detail", activity, "Toggle detailed tool activity."),
+            ("podman", "Podman sandbox", podman, "Enable or disable the Podman sandbox."),
+            ("container", "Podman container", container, "Select a compatible existing Podman container."),
+            ("store", "Store server", store, "Set the HTTPS Skills/Add-on Store server."),
+        ]
+
+    def _edit_setting(self, key):
+        if key == "provider": self.configure("provider"); return
+        if key == "model": self.fetch_models(); return
+        if key == "key": self.configure("key"); return
+        options = {
+            "mode": [("Plan", "plan"), ("Build", "build"), ("Max", "max")],
+            "permission": [("Ask before changes", "ask"), ("Workspace auto-approve", "auto"), ("Read-only", "readonly")],
+            "thinking": [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
+            "activity": [("Detailed", True), ("Compact", False)],
+            "podman": [("Enabled", True), ("Disabled", False)],
+        }
+        if key in options:
+            cfg_key = {"mode":"execution_mode", "permission":"permission_mode", "thinking":"thinking_effort", "activity":"show_activity_details", "podman":"podman_sandbox_enabled"}[key]
+            current = self.cfg.get(cfg_key, "build" if key == "mode" else "ask" if key == "permission" else "off" if key == "thinking" else True if key == "activity" else False if key == "podman" else "customtkinter")
+            labels = [label for label, _ in options[key]]
+            current_label = next((label for label, value in options[key] if value == current), None)
+            selected = self.choose("Set " + key, labels, current_label)
+            if selected is not None:
+                self.cfg[cfg_key] = dict(options[key])[selected]
+        elif key == "base":
+            self.cfg["openai_base_url"] = self.prompt("API base URL", self.cfg.get("openai_base_url") or PROVIDERS.get(self.cfg.get("provider_name", "OpenAI"), ""))
+        elif key == "container":
+            try:
+                from .agent import _podman_list_workspace_containers
+                compatible = _podman_list_workspace_containers()
+                names = [str(item.get("name", "")) for item in compatible if item.get("name")]
+                choices = ["Managed/default"] + names
+                selected = self.choose("Select compatible Podman container", choices, self.cfg.get("podman_container_name") or "Managed/default")
+                if selected is not None: self.cfg["podman_container_name"] = "" if selected == "Managed/default" else selected
+            except Exception as exc:
+                self.notice = f"Could not list Podman containers: {type(exc).__name__}: {exc}"
+                return
+        elif key == "store":
+            self.cfg["skill_store_server"] = self.prompt("HTTPS Skills/Add-on Store URL", self.cfg.get("skill_store_server", "https://skills-manager.freesrv.com"))
+        try:
+            write_config(self.cfg)
+            self.notice = "Setting saved."
+        except Exception as exc:
+            self.notice = f"Setting not saved: {type(exc).__name__}: {exc}"
+
     def prompt(self,title,initial=""):
         curses.echo(); curses.curs_set(1); h,w=self.s.getmaxyx(); old_timeout = 150
         try: old_timeout = self.s.getdelay()
@@ -311,8 +421,12 @@ class TUI:
             value=self.s.getstr(h-1,min(len(title)+1,max(0,w-2)),max(1,w-len(title)-3)).decode("utf-8","replace")
         except (curses.error, UnicodeError, OSError):
             value=initial
+        except KeyboardInterrupt:
+            value = initial
         finally:
             try: curses.noecho()
+            except curses.error: pass
+            try: curses.curs_set(0)
             except curses.error: pass
             try: self.s.timeout(old_timeout)
             except curses.error: pass
@@ -322,17 +436,28 @@ class TUI:
         if not options: return None
         idx=options.index(current) if current in options else 0
         while True:
-            self.s.erase(); h,w=self.s.getmaxyx()
+            try:
+                self.s.erase()
+                h, w = self.s.getmaxyx()
+            except (curses.error, OSError):
+                return None
+            if h < 4 or w < 8:
+                return None
             self.safe_add(1,2,title,curses.A_BOLD|curses.color_pair(1))
             for i,opt in enumerate(options[:max(1,h-5)]):
                 self.safe_add(3+i,3,("❯ " if i==idx else "  ")+str(opt),curses.A_REVERSE if i==idx else 0)
-            self.safe_add(h-1,2,"↑/↓ move • Enter select • Esc cancel",curses.A_DIM); self.s.refresh()
+            self.safe_add(h-1,2,"↑/↓ move • Enter select • Esc cancel",curses.A_DIM)
+            try: self.s.refresh()
+            except (curses.error, OSError): return None
             # The main screen uses a finite curses timeout to stay responsive.
             # A timeout is reported as curses.error; it is not a fatal input error.
             try:
                 key=self.s.get_wch()
             except curses.error:
+                # curses uses this exception for the configured input timeout.
                 continue
+            except OSError:
+                return None
             if key in (curses.KEY_UP,"k") : idx=(idx-1)%len(options)
             elif key in (curses.KEY_DOWN,"j"): idx=(idx+1)%len(options)
             elif key in ("\n",curses.KEY_ENTER,10,13): return options[idx]
@@ -361,9 +486,14 @@ class TUI:
                 try: self.s.timeout(old_timeout)
                 except curses.error: pass
             if not key:
-                self.notice="API key unchanged (no key entered)."
+                self.notice="API keys unchanged (no key entered)."
                 return
-            self.cfg["openai_api_keys"]=[key]
+            existing = api_keys(self.cfg)
+            action = self.choose("API key action", ["Add this key", "Replace all keys"], "Add this key") if existing else "Replace all keys"
+            if action == "Add this key":
+                self.cfg["openai_api_keys"] = list(dict.fromkeys(existing + [key]))
+            elif action == "Replace all keys":
+                self.cfg["openai_api_keys"] = [key]
         try:
             write_config(self.cfg)
             self.notice="Settings saved securely to "+str(CONFIG)
@@ -465,20 +595,25 @@ class TUI:
             self.notice = ("Installed bundled skills: " + ", ".join(installed)) if installed else "All bundled skills are already installed."
             return
         skills = discover_skills(skills_dir)
-        if not skills:
+        from .claude_skills import discover_claude_skills
+        claude = discover_claude_skills([Path.cwd()/".claude"/"skills", Path.home()/".claude"/"skills", skills_dir])
+        combined = [(item, "python") for item in skills] + [(item, "claude") for item in claude]
+        if not combined:
             self.notice = "No skills installed. Press i to install bundled skills."
             return
-        labels = [f"{item['name']} — {item.get('description', '')}" for item in skills]
+        labels = [f"{'Claude SKILL.md: ' if kind == 'claude' else ''}{item['name']} — {item.get('description', '')}" for item, kind in combined]
         selected = self.choose("Select skill", labels)
         if selected is None:
             return
-        name = skills[labels.index(selected)]["name"]
+        item, kind = combined[labels.index(selected)]
+        name = item["name"]
+        key = "claude:" + name if kind == "claude" else name
         disabled = set(self.cfg.get("disabled_skills", []))
-        if name in disabled:
-            disabled.remove(name)
+        if key in disabled or name in disabled:
+            disabled.discard(key); disabled.discard(name)
             state = "enabled"
         else:
-            disabled.add(name)
+            disabled.add(key)
             state = "disabled"
         self.cfg["disabled_skills"] = sorted(disabled)
         try:
@@ -490,6 +625,26 @@ class TUI:
     def manage_addon(self, action):
         from .addons import AddonManager, create_addon_template
         directory = paths.global_addons_dir()
+        if action == "store":
+            query = self.prompt("Search Add-on Store (blank = all)") or ""
+            try:
+                from .addon_store import AddonStoreClient
+                client = AddonStoreClient(self.cfg.get("skill_store_server", "https://skills-manager.freesrv.com"))
+                items = client.list_addons(query)
+                if not items:
+                    self.notice = "No add-ons found, or the configured store has no add-on catalogue."
+                    return
+                labels = [f"{item.get('name')} v{item.get('version', '?')} — {item.get('description', '')}" for item in items]
+                selected = self.choose("Select add-on to install", labels)
+                if selected is None:
+                    return
+                item = items[labels.index(selected)]
+                name = str(item.get("name", ""))
+                client.install_addon(name, directory, expected_sha256=str(item.get("sha256") or "") or None)
+                self.notice = f"Installed add-on {name}. Restart the current task to load its tools."
+            except Exception as exc:
+                self.notice = f"Add-on Store unavailable: {type(exc).__name__}: {exc}"
+            return
         if action == "create":
             name = self.prompt("New add-on ID (letters, numbers, . _ -)")
             if not name:
@@ -583,7 +738,7 @@ class TUI:
                 if job["status"] == "running": return f"{job_id}: running; continue your own work, this check did not wait."
                 return f"{job_id}: {job['status']}\n{job.get('result', '')[:10000]}"
         def start_subagent(description, prompt):
-            if self.mode != "Build": return "DENIED: subagents that can modify files are available only in Build mode."
+            if self.mode not in ("Build", "Max"): return "DENIED: subagents that can modify files are available only in Build or Max mode."
             with _SUBAGENT_JOBS_LOCK:
                 active = sum(1 for item in _SUBAGENT_JOBS.values() if item.get("status") == "running")
                 if active >= 4: return "SUBAGENT_LIMIT: four subagents are already running."
@@ -607,7 +762,7 @@ class TUI:
                     while True:
                         response_sub = client.chat.completions.create(
                             model=model, messages=history_sub, tools=sub_schemas,
-                            **protocol_request_options(model_profile, has_tools=bool(sub_schemas)))
+                            **protocol_request_options(model_profile, has_tools=bool(sub_schemas), thinking_effort=self.cfg.get("thinking_effort", "off"), model=model, base_url=base))
                         msg_sub = response_sub.choices[0].message
                         sub_calls = list(getattr(msg_sub, "tool_calls", None) or [])
                         sub_content = msg_sub.content or ""
@@ -685,7 +840,7 @@ class TUI:
         progress=ProgressTracker()
         progress.reset(user)
         readonly_names={"read_file","glob_files","grep_files","web_search","web_fetch","task_status"}
-        active_schemas = schemas if self.mode == "Build" else [x for x in schemas if original_names.get(x.get("function",{}).get("name")) in readonly_names]
+        active_schemas = schemas if self.mode in ("Build", "Max") else [x for x in schemas if original_names.get(x.get("function",{}).get("name")) in readonly_names]
         active_schemas = list(active_schemas) + [{
             "type": "function", "function": {
                 "name": "ask_user",
@@ -696,12 +851,20 @@ class TUI:
                 }, "required": ["question"], "additionalProperties": False}
             }
         }]
-        delegation_requested=self.mode == "Build" and bool(re.search(r"\b(use|with|via|through|delegate to)\b.{0,30}\b(sub.?agents?|parallel agents?)\b|\b(sub.?agents?)\b.{0,30}\b(required|must|please use)\b",user,re.I))
+        delegation_requested=self.mode in ("Build", "Max") and bool(re.search(r"\b(use|with|via|through|delegate to)\b.{0,30}\b(sub.?agents?|parallel agents?)\b|\b(sub.?agents?)\b.{0,30}\b(required|must|please use)\b",user,re.I))
         delegation_started=set()
         delegation_prompted=False
         loaded_skill_names = ", ".join(str(m.get("name", "skill")) for m in skill_meta) or "none"
         loaded_addon_names = ", ".join(x.name for x in addon_manager.infos if x.enabled and not x.error) or "none"
-        history=[{"role":"system","content":f"You are Agent Code, a general research and coding agent, not just a code generator. Work only inside this workspace: {WORKSPACE}. Current mode: {self.mode}. Native Skills available: {loaded_skill_names}. Application Add-ons available: {loaded_addon_names}. For current facts, comparisons, unfamiliar technology, APIs, troubleshooting, or research questions, use web_search and follow relevant results with web_fetch; prefer primary/authoritative sources, cite source titles and URLs, separate evidence from inference, and never invent sources. For coding tasks, research docs when details are unfamiliar or likely to have changed, but do not browse unnecessarily for simple edits. In Plan mode you MUST only inspect and explain a concrete plan; do not call write, edit, append, shell, or any state-changing tool. No implementation until the user explicitly switches to Build mode and submits/approves the task. In Build mode you may use available tools subject to their restrictions. Ask before destructive actions. Tools use their registered namespaces; never invent tool names. {security_prompt_directive()} Avoid repeating identical tool calls; reuse unchanged file reads and change strategy when searches stop producing new information. {('The user explicitly requested subagents: launch at least one focused task, then collect and integrate its result.' if delegation_requested else '')}"}]
+        try:
+            from .claude_skills import build_claude_skill_context
+            claude_context = build_claude_skill_context(
+                [Path.cwd()/".claude"/"skills", Path.home()/".claude"/"skills", paths.global_skills_dir()],
+                self.cfg.get("disabled_skills", []))
+        except Exception as exc:
+            claude_context = ""
+            self.activity.append(f"Claude Skills discovery skipped: {type(exc).__name__}: {exc}")
+        history=[{"role":"system","content":f"You are Agent Code, a general research and coding agent, not just a code generator. Work only inside this workspace: {WORKSPACE}. Current mode: {self.mode}. {BlueprintStore(WORKSPACE).prompt_context()} Native Skills available: {loaded_skill_names}. Application Add-ons available: {loaded_addon_names}. {claude_context} For current facts, comparisons, unfamiliar technology, APIs, troubleshooting, or research questions, use web_search and follow relevant results with web_fetch; prefer primary/authoritative sources, cite source titles and URLs, separate evidence from inference, and never invent sources. For coding tasks, research docs when details are unfamiliar or likely to have changed, but do not browse unnecessarily for simple edits. In Plan mode you MUST only inspect and explain a concrete plan; do not call write, edit, append, shell, or any state-changing tool. No implementation until the user explicitly switches to Build mode and submits/approves the task. In Build and Max modes you may use available tools subject to their restrictions. In Max mode prioritize the strongest complete result over token minimization: research when useful, plan, implement, test, verify independently, fix failures, and continue until acceptance criteria are met or blocked. Max never bypasses permissions or safety. Ask before destructive actions. Tools use their registered namespaces; never invent tool names. {security_prompt_directive()} Avoid repeating identical tool calls; reuse unchanged file reads and change strategy when searches stop producing new information. {('The user explicitly requested subagents: launch at least one focused task, then collect and integrate its result.' if delegation_requested else '')}"}]
         prior_messages = self.messages[:-1] if self.messages and self.messages[-1] == ("user", user) else self.messages
         for role,content in prior_messages[-16:]:
             if role in ("user","assistant"):
@@ -719,7 +882,7 @@ class TUI:
                 # Assemble tool-call deltas before dispatch; partial JSON is never run.
                 self.stream_text = ""
                 self.messages.append(("assistant", ""))
-                stream_options = protocol_request_options(model_profile, has_tools=bool(active_schemas))
+                stream_options = protocol_request_options(model_profile, has_tools=bool(active_schemas), thinking_effort=self.cfg.get("thinking_effort", "off"), model=model, base_url=base)
                 stream = client.chat.completions.create(
                     model=model, messages=history, tools=active_schemas or None,
                     stream=True, timeout=600, **stream_options,
@@ -904,7 +1067,6 @@ class TUI:
                         user_result = "Tool finished" if not result_text.startswith("ERROR") else "Tool failed"
                     if original_name == "read_file" and not result_text.startswith("ERROR"):
                         header = result_text.splitlines()[0] if result_text else ""
-                        import re
                         match = re.search(r"lines (\d+)-(\d+) of (\d+)", header)
                         if match:
                             count = int(match.group(2)) - int(match.group(1)) + 1
@@ -933,14 +1095,13 @@ class TUI:
     def install_podman(self):
         if shutil.which("podman"):
             self.notice="Podman is already installed."; return
-        if not os.path.exists("/etc/os-release"):
-            self.notice="Automatic Podman installation is supported on common Linux distributions."; return
-        if shutil.which("apt-get"): cmd=["sudo","apt-get","install","-y","podman"]
-        elif shutil.which("dnf"): cmd=["sudo","dnf","install","-y","podman"]
-        elif shutil.which("pacman"): cmd=["sudo","pacman","-S","--needed","--noconfirm","podman"]
-        elif shutil.which("zypper"): cmd=["sudo","zypper","--non-interactive","install","podman"]
-        elif shutil.which("apk"): cmd=["sudo","apk","add","podman"]
-        else: self.notice="Unsupported package manager; install Podman manually."; return
+        if not (sys.platform.startswith("linux") or sys.platform.startswith("freebsd") or sys.platform == "darwin"):
+            self.notice="Install Podman for this operating system and initialize its machine manually."; return
+        from .platform_support import podman_install_command
+        detected = podman_install_command()
+        if not detected: self.notice="No supported package manager detected; install Podman using your distribution's package manager."; return
+        prefix, command = detected
+        cmd = prefix + command
         answer=self.prompt("Install Podman using system package manager? type yes", "no")
         if answer.lower()!="yes": self.notice="Podman install cancelled."; return
         try:
@@ -1055,7 +1216,18 @@ class TUI:
         threading.Thread(target=self._answer_worker, args=(user,), daemon=True, name="agent-code-tui-agent").start()
 
     def run(self):
-        pages=["Chat","Workspace","Tasks","Activity","Skills","MCP","Settings","Add-ons","Help"]
+        pages=["Chat","Workspace","Tasks","Activity","Skills","MCP","Settings","Add-ons","Add-on Store","Help"]
+        try:
+            self._run_loop(pages)
+        except KeyboardInterrupt:
+            self.notice = "Interrupted — shutting down cleanly."
+            self.running = False
+        finally:
+            self.cancel_event.set()
+            try: self.ask_user_broker.cancel_all()
+            except Exception: pass
+
+    def _run_loop(self, pages):
         while self.running:
             # Drain worker events on the curses/UI thread only.
             try:
@@ -1078,8 +1250,13 @@ class TUI:
                         curses.echo()
                         try:
                             raw = self.s.getstr(max(1, h - 2), 1, max(1, w - 3)).decode("utf-8", "replace").strip()
+                        except (curses.error, OSError, UnicodeError):
+                            raw = ""
                         finally:
-                            curses.noecho()
+                            try:
+                                curses.noecho()
+                            except curses.error:
+                                pass
                         qid = question.get("question_id")
                         if not raw:
                             self.ask_user_broker.answer_question(qid, skip=True)
@@ -1092,10 +1269,13 @@ class TUI:
                         self.notice = "Answer submitted. Agent is continuing…"
             except queue.Empty:
                 pass
-            self.draw()
             try:
+                self.draw()
                 ch=self.s.get_wch()
             except curses.error:
+                continue
+            except OSError:
+                self.notice = "Terminal input is temporarily unavailable."
                 continue
             if ch is None:
                 continue
@@ -1103,7 +1283,13 @@ class TUI:
                 self.running = False
                 continue
             if ch == curses.KEY_F2:
-                self.mode="Plan" if self.mode=="Build" else "Build"; self.notice="Mode changed to "+self.mode
+                self.mode = {"Plan": "Build", "Build": "Max", "Max": "Plan"}.get(self.mode, "Build")
+                self.cfg["execution_mode"] = {"Plan": "plan", "Build": "build", "Max": "max"}[self.mode]
+                try:
+                    write_config(self.cfg)
+                    self.notice="Mode changed to "+self.mode
+                except Exception as exc:
+                    self.notice=f"Mode not saved: {type(exc).__name__}: {exc}"
                 continue
             if self.page == "Chat" and isinstance(ch, str) and len(ch) == 1 and ch.isprintable():
                 self.input += ch
@@ -1118,11 +1304,13 @@ class TUI:
                 if self.page=="Activity": self.activity_scroll=max(0,self.activity_scroll-amount)
                 else: self.scroll=max(0,self.scroll-amount)
                 continue
-            if ch == curses.KEY_HOME and self.page == "Chat":
-                self.scroll = 10**9
+            if ch == curses.KEY_HOME:
+                if self.page == "Activity": self.activity_scroll = 10**9
+                else: self.scroll = 10**9
                 continue
-            if ch == curses.KEY_END and self.page == "Chat":
-                self.scroll = 0
+            if ch == curses.KEY_END:
+                if self.page == "Activity": self.activity_scroll = 0
+                else: self.scroll = 0
                 continue
             if ch == curses.KEY_F5 or ch == "\x03":
                 if self.busy:
@@ -1141,7 +1329,18 @@ class TUI:
             if ch in ("q", "Q", "\x03") and (self.page != "Chat" or not self.input):
                 self.running=False
             elif ch == "\t": self.page=pages[(pages.index(self.page)+1)%len(pages)]
-            elif ch in tuple(str(i) for i in range(1, len(pages)+1)) and (self.page != "Chat" or not self.input): self.page=pages[int(ch)-1]
+            elif ch in tuple(str(i) for i in range(1, 10)) and (self.page != "Chat" or not self.input): self.page=pages[int(ch)-1]
+            elif ch == "0" and (self.page != "Chat" or not self.input): self.page = "Help"
+            elif self.page == "Settings" and ch == curses.KEY_UP:
+                self.settings_selection = max(0, self.settings_selection - 1)
+            elif self.page == "Settings" and ch == curses.KEY_DOWN:
+                self.settings_selection = min(len(self._settings_rows()) - 1, self.settings_selection + 1)
+            elif self.page == "Settings" and ch in ("\n", curses.KEY_ENTER, 10, 13):
+                rows = self._settings_rows()
+                if rows: self._edit_setting(rows[min(self.settings_selection, len(rows)-1)][0])
+            elif self.page == "Settings" and ch in ("e", "E"):
+                rows = self._settings_rows()
+                if rows: self._edit_setting(rows[min(self.settings_selection, len(rows)-1)][0])
             elif ch in ("p","P") and self.page in ("Settings","Help"): self.page="Settings"; self.configure("provider")
             elif ch in ("m","M") and self.page in ("Settings","Help"): self.page="Settings"; self.fetch_models()
             elif ch in ("i","I") and self.page in ("Settings","Help"): self.install_podman()
@@ -1176,6 +1375,11 @@ class TUI:
             elif self.page=="Add-ons" and ch in ("t","T"): self.manage_addon("toggle")
             elif self.page=="Add-ons" and ch in ("n","N"): self.manage_addon("create")
             elif self.page=="Add-ons" and ch in ("o","O"): self.manage_addon("open")
+            elif self.page=="Add-ons" and ch in ("s","S"): self.manage_addon("store")
+            elif self.page=="Settings" and ch in ("r","R"):
+                self._edit_setting("thinking")
+            elif self.page=="Add-on Store" and ch in ("s","S", "\n", curses.KEY_ENTER, 10, 13):
+                self.manage_addon("store")
             elif self.page=="MCP" and ch in ("a","A"): self.mcp_configure("add")
             elif self.page=="MCP" and ch in ("e","E"): self.mcp_configure("edit")
             elif self.page=="MCP" and ch in ("t","T"): self.mcp_configure("toggle")
@@ -1189,9 +1393,15 @@ class TUI:
 
 def main():
     if not (os.isatty(0) and os.isatty(1)):
-        print("Agent Code TUI requires an interactive terminal. Run: agent-code tui"); return 2
-    try: curses.wrapper(lambda scr:TUI(scr).run())
-    except KeyboardInterrupt: pass
+        print("Agent Code legacy TUI requires an interactive terminal. Run: agent-code tui"); return 2
+    try:
+        curses.wrapper(lambda scr: TUI(scr).run())
+    except KeyboardInterrupt:
+        # curses.wrapper restores terminal modes before returning control here.
+        pass
+    except curses.error as exc:
+        print(f"Agent Code legacy TUI could not initialize the terminal: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 if __name__=="__main__": raise SystemExit(main())

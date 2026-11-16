@@ -36,6 +36,15 @@ def main(argv=None):
     p = sub.add_parser("gui", help="launch the desktop GUI explicitly")
     p.set_defaults(func=_gui)
 
+    p = sub.add_parser("server", help="start the authenticated Agent Code web server")
+    p.add_argument("--host", default="0.0.0.0", help="bind address (default: all network interfaces)")
+    p.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
+    p.add_argument("--username", help="set the web UI username")
+    p.add_argument("--set-password", action="store_true", help="interactively set/change the web UI password")
+    p.add_argument("--global", dest="global_paths", action="store_true",
+                   help="use ~/.agent-code for skills, workspace and chats")
+    p.set_defaults(func=_server)
+
     p = sub.add_parser("doctor", help="diagnose installation and configuration issues")
     p.add_argument("--json", action="store_true", help="print machine-readable JSON")
     p.add_argument("--output", metavar="FILE", help="write a privacy-conscious JSON report")
@@ -58,15 +67,7 @@ def _run(args):
     if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         print("No graphical display detected; starting Agent Code TUI. Use `agent-code gui` on a desktop.")
         return _tui(args)
-    _ensure_linux_tkinter()
-    try:
-        import customtkinter  # noqa: F401
-    except ImportError:
-        print("CustomTkinter is missing. Install Agent Code dependencies with: python -m pip install -e .")
-        print("For a monitor-free PC, run `agent-code tui` instead.")
-        return 1
-    from .agent import main as m
-    m(); return 0
+    return _gui(args)
 
 def _ensure_linux_tkinter():
     """Offer an opt-in system package install for Tkinter on common Linux distros."""
@@ -94,12 +95,16 @@ def _ensure_linux_tkinter():
         commands = [["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "-y", "python3-tk"]]
     elif shutil.which("dnf"):
         commands = [["sudo", "dnf", "install", "-y", "python3-tkinter"]]
+    elif shutil.which("yum"):
+        commands = [["sudo", "yum", "install", "-y", "python3-tkinter"]]
     elif shutil.which("pacman"):
         commands = [["sudo", "pacman", "-Sy", "--needed", "tk"]]
     elif shutil.which("zypper"):
         commands = [["sudo", "zypper", "install", "python3-tk"]]
     elif shutil.which("apk"):
         commands = [["sudo", "apk", "add", "python3-tkinter", "tk"]]
+    elif shutil.which("xbps-install"):
+        commands = [["sudo", "xbps-install", "-Sy", "python3-tkinter", "tkinter"]]
     else:
         print("Unsupported package manager. Install Tkinter manually; TUI mode needs no Tkinter.")
         return
@@ -126,21 +131,39 @@ def _configure(args):
     return run_tui()
 
 def _gui(args):
+    """Launch the sole supported desktop interface: CustomTkinter."""
     _ensure_linux_tkinter()
     try:
         import tkinter  # noqa: F401
         import customtkinter  # noqa: F401
     except ImportError as exc:
-        print(f"Desktop GUI dependencies unavailable: {exc}. Try `agent-code tui`.")
+        print(f"CustomTkinter desktop dependencies unavailable: {exc}.")
+        print("Install them with: python -m pip install 'agent-code[classic-ui]'")
         return 1
-    from .agent import main as m
-    m(); return 0
+    from .agent import main as run_classic
+    run_classic()
+    return 0
 
 def _manage(args):
     if getattr(args, "global_paths", False):
         os.environ["AGENT_CODE_GLOBAL"] = "1"
     from .skill_manager import main as m
     m(); return 0
+
+def _server(args):
+    if getattr(args, "global_paths", False):
+        os.environ["AGENT_CODE_GLOBAL"] = "1"
+    password = os.getenv("AGENT_CODE_SERVER_PASSWORD") or None
+    if args.set_password:
+        import getpass
+        first = getpass.getpass("New Agent Code web UI password (12+ characters): ")
+        second = getpass.getpass("Confirm password: ")
+        if first != second:
+            print("Passwords do not match.")
+            return 2
+        password = first
+    from .server import main as run_server
+    return run_server(host=args.host, port=args.port, username=args.username, password=password)
 
 def _doctor(args):
     from .doctor import main as run_doctor

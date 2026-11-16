@@ -9,7 +9,7 @@ from typing import Any
 from .paths import user_config_file
 
 SERVICE = "agent-code"
-_DEFAULT = object()
+_DEFAULT_BACKEND = object()
 
 def _keyring():
     try:
@@ -18,22 +18,17 @@ def _keyring():
     except Exception:
         return None
 
-def _store(account: str, secret: str, backend=_DEFAULT) -> str:
-    kr = _keyring() if backend is _DEFAULT else backend
+def _store(account: str, secret: str, backend=_DEFAULT_BACKEND) -> str:
+    kr = _keyring() if backend is _DEFAULT_BACKEND else backend
     if kr is None:
         raise RuntimeError("Secure credential storage is unavailable; API key was not saved")
-    try:
-        kr.set_password(SERVICE, account, secret)
-        if kr.get_password(SERVICE, account) != secret:
-            raise RuntimeError("Secure credential storage could not verify the saved key")
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        raise RuntimeError("Secure credential storage failed; API key was not saved") from exc
+    kr.set_password(SERVICE, account, secret)
+    if kr.get_password(SERVICE, account) != secret:
+        raise RuntimeError("Could not verify credential vault write")
     return account
 
-def _load(account: str, backend=_DEFAULT) -> str:
-    kr = _keyring() if backend is _DEFAULT else backend
+def _load(account: str, backend=_DEFAULT_BACKEND) -> str:
+    kr = _keyring() if backend is _DEFAULT_BACKEND else backend
     if kr is None:
         return ""
     try:
@@ -46,8 +41,9 @@ def _keys(value: Any) -> list[str]:
         value = value.replace("\n", ",").split(",")
     return [str(x).strip().strip('"').strip("'") for x in (value or []) if str(x).strip()]
 
-def load_config(keyring_backend=_DEFAULT, config_path=None) -> dict:
+def load_config(*, keyring_backend=_DEFAULT_BACKEND, config_path=None) -> dict:
     path = Path(config_path) if config_path is not None else user_config_file()
+    load_secret = _load if keyring_backend is _DEFAULT_BACKEND else lambda account: _load(account, keyring_backend)
     if not path.exists():
         return {}
     try:
@@ -57,22 +53,23 @@ def load_config(keyring_backend=_DEFAULT, config_path=None) -> dict:
     except (OSError, ValueError):
         return {}
     if "openai_api_keys" not in cfg:
-        cfg["openai_api_keys"] = [v for ref in cfg.get("openai_api_key_refs", []) if (v := (_load(ref) if keyring_backend is _DEFAULT else _load(ref, keyring_backend)))]
+        cfg["openai_api_keys"] = [v for ref in cfg.get("openai_api_key_refs", []) if (v := load_secret(ref))]
     profiles = cfg.get("saved_providers", {})
     if isinstance(profiles, dict):
         for name, profile in profiles.items():
             if isinstance(profile, dict) and "openai_api_keys" not in profile:
-                profile["openai_api_keys"] = [v for ref in profile.get("openai_api_key_refs", []) if (v := (_load(ref) if keyring_backend is _DEFAULT else _load(ref, keyring_backend)))]
+                profile["openai_api_keys"] = [v for ref in profile.get("openai_api_key_refs", []) if (v := load_secret(ref))]
     return cfg
 
-def save_config(config: dict, keyring_backend=_DEFAULT, config_path=None) -> None:
+def save_config(config: dict, *, keyring_backend=_DEFAULT_BACKEND, config_path=None) -> None:
     if not isinstance(config, dict):
         raise TypeError("Settings must be a dictionary")
     disk = dict(config)
+    store_secret = _store if keyring_backend is _DEFAULT_BACKEND else lambda account, secret: _store(account, secret, keyring_backend)
     secrets = _keys(disk.pop("openai_api_keys", []))
     refs = list(disk.get("openai_api_key_refs", [])) if not secrets else []
     for i, secret in enumerate(secrets):
-        refs.append(_store(f"provider/default/{i}", secret) if keyring_backend is _DEFAULT else _store(f"provider/default/{i}", secret, keyring_backend))
+        refs.append(store_secret(f"provider/default/{i}", secret))
     disk["openai_api_key_refs"] = refs
     profiles = disk.get("saved_providers", {})
     if isinstance(profiles, dict):
@@ -86,7 +83,7 @@ def save_config(config: dict, keyring_backend=_DEFAULT, config_path=None) -> Non
             prefs = list(item.get("openai_api_key_refs", [])) if not pkeys else []
             pid = hashlib.sha256(str(name).encode()).hexdigest()[:20]
             for i, secret in enumerate(pkeys):
-                prefs.append(_store(f"provider/profile/{pid}/{i}", secret) if keyring_backend is _DEFAULT else _store(f"provider/profile/{pid}/{i}", secret, keyring_backend))
+                prefs.append(store_secret(f"provider/profile/{pid}/{i}", secret))
             item["openai_api_key_refs"] = prefs
             safe_profiles[name] = item
         disk["saved_providers"] = safe_profiles

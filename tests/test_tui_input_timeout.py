@@ -113,3 +113,26 @@ def test_draw_renders_latest_answer_inside_the_real_chat_viewport(monkeypatch):
     transcript = " ".join(tui.s.cells.values())
     assert "The fix is complete" in transcript
     assert "all checks passed" in transcript
+
+
+def test_safe_add_and_draw_survive_terminal_resize_or_closed_screen():
+    class BrokenScreen:
+        def getmaxyx(self):
+            raise curses.error("terminal resized")
+        def erase(self):
+            raise curses.error("terminal unavailable")
+    tui = TUI.__new__(TUI)
+    tui.s = BrokenScreen()
+    tui.safe_add(0, 0, "safe")
+    tui.draw()
+
+
+def test_choose_returns_cleanly_when_terminal_is_unavailable():
+    class BrokenScreen:
+        def erase(self):
+            raise curses.error("terminal unavailable")
+        def getmaxyx(self):
+            return (24, 80)
+    tui = TUI.__new__(TUI)
+    tui.s = BrokenScreen()
+    assert tui.choose("Select", ["one", "two"]) is None

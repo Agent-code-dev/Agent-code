@@ -110,3 +110,42 @@ def test_service_priority_prefers_replacement_and_higher_priority(tmp_path):
     manager = AddonManager(tmp_path)
     manager.load()
     assert manager.resolve_service("skill_store").value == "high"
+
+
+def test_addon_manifest_api_version_and_permissions_are_exposed(tmp_path):
+    folder = tmp_path / "addon-v1"
+    folder.mkdir()
+    (folder / "addon.json").write_text(json.dumps({
+        "name": "addon-v1", "version": "1.0.0", "api_version": 1,
+        "permissions": ["network", "workspace-read"]
+    }))
+    (folder / "addon.py").write_text("def register(api): pass\n")
+    manager = AddonManager(tmp_path)
+    info = manager.discover()[0]
+    assert info.api_version == 1
+    assert info.permissions == ["network", "workspace-read"]
+
+
+def test_unsupported_addon_api_version_is_disabled(tmp_path):
+    folder = tmp_path / "future-addon"
+    folder.mkdir()
+    (folder / "addon.json").write_text(json.dumps({"name": "future-addon", "api_version": 2}))
+    (folder / "addon.py").write_text("def register(api): pass\n")
+    manager = AddonManager(tmp_path)
+    info = manager.discover()[0]
+    assert info.error and "unsupported add-on API version" in info.error
+
+
+def test_addon_can_register_webview_component(tmp_path):
+    folder = tmp_path / "web-addon"
+    folder.mkdir()
+    (folder / "addon.json").write_text(json.dumps({"name": "web-addon"}))
+    (folder / "addon.py").write_text('''
+def register(api):
+    api.register_web_component("status", label="Status", location="addons",
+        html="<strong>Ready</strong>", css="strong { color: green; }")
+''')
+    manager = AddonManager(tmp_path)
+    manager.load()
+    assert manager.web_components[0]["name"] == "status"
+    assert manager.web_components[0]["html"] == "<strong>Ready</strong>"

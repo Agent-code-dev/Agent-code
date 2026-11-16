@@ -46,3 +46,37 @@ def test_textual_ui_does_not_scan_filesystem_on_its_poll_timer():
     assert "_workspace_summary()" not in poll
     assert "_skills_summary()" not in poll
     assert "_addons_summary()" not in poll
+
+
+def test_textual_tui_initializes_question_broker_and_routes_questions_to_ui():
+    source = (SRC / "textual_tui.py").read_text(encoding="utf-8")
+    assert "self.engine.ask_user_broker = AskUserBroker" in source
+    assert "def _drain_engine_events" in source
+    assert "AgentQuestionScreen" in source
+    assert "_answer_agent_question" in source
+
+
+def test_textual_addons_navigation_uses_real_tab_id_and_worker_always_resets_busy():
+    source = (SRC / "textual_tui.py").read_text(encoding="utf-8")
+    assert '"addons" if name == "Add-ons"' in source
+    worker = source.split("def _run_agent", 1)[1].split("def action_stop_task", 1)[0]
+    assert "finally:" in worker and "self.engine.busy = False" in worker
+
+
+def test_textual_settings_search_is_compact_and_does_not_push_settings_tabs_out_of_view():
+    source = (SRC / "textual_tui.py").read_text(encoding="utf-8")
+    assert 'with Horizontal(id="settings-search-row")' in source
+    assert 'yield Input(placeholder="Filter settings…", id="settings_search")' in source
+    assert 'yield Static("All settings", id="search-results")' in source
+    assert "#settings-search-row { height: 3; min-height: 3;" in source
+    assert "#search-results { width: 2fr; height: 3; min-height: 3;" in source
+    assert "#settings-tabs { height: 1fr; min-height: 0; }" in source
+
+
+def test_textual_ui_uses_restrained_modern_neutral_palette():
+    source = (SRC / "textual_tui.py").read_text(encoding="utf-8")
+    assert "Screen { background: #111315; color: #e5e7e9; }" in source
+    assert "#176b91" not in source
+    assert "#45b8e8" not in source
+    assert "#8bd5ff" not in source
+    assert 'color = "#c2cbd1" if role == "user"' in source

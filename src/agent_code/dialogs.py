@@ -1,8 +1,18 @@
 """Consistent dark, CustomTkinter-native modal dialogs for Agent Code."""
 from __future__ import annotations
 
-import tkinter as tk
-import customtkinter as ctk
+try:
+    import tkinter as tk
+    import customtkinter as ctk
+except ImportError:
+    class _UnavailableDialog:
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("Tk dialogs are unavailable in this runtime; use the authenticated WebUI server or terminal interface.")
+    class _CTkFallback:
+        CTkToplevel = _UnavailableDialog
+        def __getattr__(self, _name): return _UnavailableDialog
+    ctk = _CTkFallback()
+    tk = None
 
 BG = "#0a0d13"
 PANEL = "#10141b"
