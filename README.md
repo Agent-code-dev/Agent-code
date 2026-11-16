@@ -1,273 +1,175 @@
-## Installation
-
-Install Agent Code with one command:
-
-```bash
-pip install agent-code
-```
-
-Then launch the CustomTkinter desktop app with `agent-code`, or start the terminal interface with `agent-code tui`. The authenticated WebUI is separate and starts with `agent-code server`; it does not require a local desktop display.
-
-Upgrade later with:
-
-```bash
-pip install --upgrade agent-code
-```
-
-## Agent Code Server (browser access)
-
-Run `agent-code server` to start the same Agent Code workspace as a password-protected website. Open the printed URL from the host machine or another device on the same trusted network. The first run generates a one-time password and prints it in the server startup output; set your own credentials with `agent-code server --username myuser --set-password`. Choose a port with `--port 9000`. The server works on headless Linux, Windows and macOS, including the lightweight `pip install "agent-code[lite]"` option. See [`docs/server-mode.md`](docs/server-mode.md) for setup and security guidance. Do not expose the plain HTTP listener directly to the public internet; use a VPN or HTTPS reverse proxy.
-
 <p align="center">
-  <img src="src/agent_code/data/icons/agent-code.png" width="145" alt="Agent Code Logo">
-</p><h1 align="center">Agent Code 2.3.0</h1><h3 align="center">⚡ Your AI coding agent. Your tools. Your environment.</h3><p align="center">
-  An open-source, extensible AI coding agent with a CustomTkinter desktop, authenticated WebUI server and terminal interfaces.
+  <img src="src/agent_code/data/icons/agent-code.png" width="120" alt="Agent Code logo">
+</p><h1 align="center">Agent Code 2.3.0</h1><p align="center">
+  <strong>Your AI coding agent. Your tools. Your environment.</strong>
   <br>
-  Build, modify, debug, and manage projects using AI — with customizable Skills, application Add-ons, and MCP integrations.
+  An open-source, customizable AI coding agent for desktop, terminal, and browser-based workflows.
 </p><p align="center">
-  <a href="https://pypi.org/project/agent-code/">
-    <img src="https://img.shields.io/pypi/v/agent-code?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI Version">
-  </a>
-  <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/Application-MIT-2ea44f?style=for-the-badge" alt="MIT License">
-  </a>
-  <a href="server/LICENSE">
-    <img src="https://img.shields.io/badge/Server-AGPL--3.0-blue?style=for-the-badge" alt="Server AGPL License">
-  </a>
+  <a href="https://pypi.org/project/agent-code/"><img src="https://img.shields.io/pypi/v/agent-code?style=for-the-badge&logo=pypi" alt="PyPI"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python" alt="Python 3.10+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Application-MIT-2ea44f?style=for-the-badge" alt="MIT"></a>
+  <a href="server/LICENSE"><img src="https://img.shields.io/badge/Server-AGPL--3.0-blue?style=for-the-badge" alt="AGPL-3.0"></a>
 </p><p align="center">
-  <a href="https://github.com/agent-code-dev/agent-code">
-    <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=flat-square&logo=github" alt="GitHub">
-  </a>
-  <a href="https://pypi.org/project/agent-code/">
-    <img src="https://img.shields.io/badge/PyPI-Install-3775A9?style=flat-square&logo=pypi" alt="PyPI">
-  </a>
-  <a href="https://agent-code-dev.github.io">
-    <img src="https://img.shields.io/badge/Website-Visit-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Website">
-  </a>
-</p><p align="center">
-  <b>Windows · Linux · macOS</b>
-  <br>
-  <sub>Python 3.10+ · OpenAI-compatible AI providers · Extensible architecture</sub>
+  <a href="https://github.com/Agent-code-dev/Agent-code">GitHub</a> ·
+  <a href="https://pypi.org/project/agent-code/">PyPI</a> ·
+  <a href="https://agent-code-dev.github.io">Website</a>
 </p>---
 
-## Cross-distribution support
+What is Agent Code?
 
-Agent Code is a Python application and does not require a specific Linux distribution. Install it with pip on supported Python 3.10+ environments. The desktop uses CustomTkinter. The authenticated WebUI server is separate and does not require a desktop display. On headless systems, use the `lite` terminal-only install or the server command. Optional Podman setup detects common package managers and provides a manual-install path when a distribution uses another package manager.
+Agent Code is an open-source AI coding agent built around customization.
 
-## Claude-compatible skills
+It gives you an AI-powered development workspace where you choose your AI provider, models, tools, extensions, and execution environments.
 
-Agent Code supports instruction-only `SKILL.md` files from project `.claude/skills/`, user `~/.claude/skills/`, and the global Agent Code skills directory. These are loaded as instructions without executing Python. See [`docs/claude-skills.md`](docs/claude-skills.md).
+Unlike a fixed collection of tools, Agent Code provides three independent extension systems:
 
-## Add-on Store
+- Skills — Extend the AI agent with tools and specialized capabilities.
+- Add-ons — Extend the Agent Code application itself.
+- MCP — Connect external tools through the Model Context Protocol.
 
-The Skills Store server can also host Agent Code application add-ons. Configure the HTTPS store URL in Settings → Connections. Browse and install trusted add-ons from the desktop Add-on Store, or publish packages with the server administrator token. The server's add-on catalogue endpoints are admin-publish/public-download and include SHA-256 metadata; Python add-ons are executable code and are not sandboxed. See [`ADDON-DEVELOPMENT.md`](ADDON-DEVELOPMENT.md) and [`server/README.md`](server/README.md).
+Use Agent Code through its desktop application, terminal interfaces, or authenticated WebUI server.
 
-🌟 What is Agent Code?
+Features
 
-Agent Code is an open-source desktop AI coding agent designed to make AI-assisted software development more extensible and customizable.
+Area| Capabilities
+AI Agent| Tool calling, multi-step tasks, planning, implementation, debugging
+Desktop| CustomTkinter interface, project navigation, settings, Markdown rendering
+Terminal| Textual TUI and legacy curses interface
+WebUI| Password-protected browser interface
+Providers| OpenAI-compatible providers and custom endpoints
+Skills| Native Python Skills and Claude-compatible "SKILL.md" instructions
+Add-ons| Application UI contributions, actions, hooks, and integrations
+MCP| External tool-server integration
+Execution| Local machine, Podman container, and SSH remote execution
+Project context| ".gitignore", ".agentignore", task history, checkpoints, and diffs
+Diagnostics| Environment checks and diagnostic reports
 
-It combines an AI-powered development workspace with a flexible tool architecture, allowing developers to expand both the capabilities of the AI agent and the application itself.
+Installation
 
-Instead of locking users into one provider or one fixed collection of tools, Agent Code gives developers control over their AI models, integrations, execution environments, and extensions.
+Requirements: Python 3.10 or later.
 
-🚀 The idea behind Agent Code
+Install from PyPI:
 
-- 🤖 Use different AI providers with your own API keys.
-- 🧩 Give the AI additional capabilities through native Python Skills.
-- 🔌 Extend the desktop application through Add-ons.
-- 🌐 Connect external tools through MCP.
-- 💻 Work with local projects and development environments.
-- 📦 Use an optional Alpine Linux sandbox.
-- 🖥️ Connect to remote development machines through SSH.
-- ⚙️ Customize agent workflows and execution permissions.
+python -m pip install agent-code
 
-One application. Multiple extension systems. Your choice of AI provider.
+Launch the desktop application:
 
----
+agent-code
 
-✨ Features
+Launch the terminal interface:
 
-### Automatic project validation
+agent-code tui
 
-The validation helper can recognize common test entry points for Python, Rust, Go, and Node projects. It does not install dependencies or configure build systems. Node package-manager test scripts (`npm`, `pnpm`, `yarn`, or `bun`) always require a direct approval because package scripts can run arbitrary project commands, even when the general permission mode is Auto.
+Launch the authenticated browser interface:
 
-### Project-aware context filtering
+agent-code server
 
-Agent Code reads `.gitignore` and `.agentignore` while building its bounded project map. Add patterns to `.agentignore` to skip generated output, vendored dependencies, large assets, or folders that are irrelevant to the current task. Example:
+Upgrade:
 
-```gitignore
-# Generated files and dependencies
-node_modules/
-dist/
-build/
-coverage/
-*.min.js
+python -m pip install --upgrade agent-code
 
-# Keep source maps out of the agent context
-*.map
-```
+Headless installation
 
-Hard safety exclusions (including `.env`, credential files, and SSH keys) cannot be overridden by negation patterns.
+For machines without a graphical desktop, use the lightweight installation:
 
+python -m pip install "agent-code[lite]"
+agent-code server
 
-<table>
-  <tr>
-    <td width="50%" valign="top">🤖 AI Coding Agent
+You can also use "agent-code tui" for terminal-based development.
 
-- Tool-calling architecture
+See the "installation guide" (docs/installation.md).
 
-- Multi-step task execution
+Interfaces
 
-- Project-aware workflows
+Interface| Command| Description
+Desktop| "agent-code"| CustomTkinter graphical workspace
+Desktop explicitly| "agent-code gui"| Launch the GUI
+Textual TUI| "agent-code tui"| Full terminal workspace
+Legacy TUI| "agent-code tui-legacy"| Classic curses interface
+WebUI| "agent-code server"| Authenticated browser-based workspace
 
-- Plan Mode and Build Mode
+Agent Code Server
 
-- Error investigation
+The server runs the Agent Code workspace through a password-protected website. It supports headless environments and does not require a local desktop display.
 
-- Task completion summaries
+Start the server:
 
-- File change and diff review
+agent-code server
 
-- Checkpoints and recovery
-  
-    </td>
-  <td width="50%" valign="top">
+The first startup generates a one-time password and prints it in the startup output.
 
-🎨 Desktop Workspace
+Set a username and password:
 
-- CustomTkinter desktop interface
+agent-code server --username myuser --set-password
 
-- Markdown rendering with syntax highlighting
+Choose a port:
 
-- Chat-based development
+agent-code server --port 9000
 
-- Markdown responses
+Open the URL printed by the server.
 
-- Project navigation
+Security: Do not expose the plain HTTP listener directly to the public internet. Use a VPN or HTTPS reverse proxy.
 
-- Model selection
+See "Server Mode" (docs/server-mode.md).
 
-- Provider configuration
+AI Providers
 
-- Activity Details panel
+Agent Code uses an OpenAI-compatible client architecture.
 
-- Integrated Skills management
-  
-    </td>
-</tr>
-<tr>
-  <td width="50%" valign="top">
+Provider presets include:
 
-🧩 Extension Architecture
+Provider| Endpoint
+OpenAI| "https://api.openai.com/v1"
+Google AI Studio| "https://generativelanguage.googleapis.com/v1beta/openai/"
+Anthropic compatibility endpoint| "https://api.anthropic.com/v1/"
+OpenRouter| Provider preset
+Custom| User-configured OpenAI-compatible endpoint
 
-- Native Python Skills
+Compatibility depends on the provider, model, and supported API features. The Anthropic entry uses an OpenAI SDK compatibility interface; it does not guarantee support for every native Anthropic API feature.
 
-- Application Add-ons
+Bring Your Own Key
 
-- MCP integration
+Agent Code follows a BYOK model:
 
-- Custom agent tools
+- Choose your own provider.
+- Choose your own model.
+- Supply your own API credentials.
+- Control your provider usage and spending.
 
-- Namespaced commands
+External providers may charge for API usage or impose their own limits.
 
-- Application lifecycle hooks
+Credential security
 
-- Supported UI extensions
+Newly saved API keys are stored through Python "keyring" in the operating system's credential store where supported.
 
-- Service integrations
-  
-    </td>
-  <td width="50%" valign="top">
+Examples include:
 
-🖥️ Execution Environments
+- Windows Credential Manager
+- macOS Keychain
+- Linux Secret Service-compatible keyrings
 
-- Local execution
+Configuration files store credential references rather than newly saved API-key values. If secure credential storage is unavailable, saving credentials fails rather than silently writing new secrets as plaintext.
 
-- Alpine Linux sandbox
+Three Extension Systems
 
-- SSH remote execution
+1. Skills — Extend the AI Agent
 
-- Browser automation
+Skills add tools and specialized capabilities to the agent.
 
-- Configurable permissions
-
-- Project workspace isolation
-
-- Multiple execution targets
-  
-    </td>
-</tr>
-
-</table>---
-
-🧠 Three Independent Extension Systems
-
-Agent Code 2.0 has three distinct extension systems.
-
-They are designed for different purposes and can coexist.
-
-System| Purpose| Extension type
-🧩 Skills| Extend what the AI agent can do| Native Python
-🔌 Add-ons| Extend Agent Code itself| Application extensions
-🌐 MCP| Connect external tools| MCP protocol
-
-🧩 1. Skills — Extend the AI Agent
-
-Skills give the AI agent additional tools and specialized capabilities.
-
-A Skill can provide:
+A native Skill can provide:
 
 - Python functions.
 - AI-callable tool schemas.
-- Agent-specific commands.
-- Natural-language command aliases.
-- Skill metadata.
-- Help documentation.
+- Agent commands and aliases.
+- Metadata and help documentation.
 
-Example Skill structure
+Example structure:
 
-skills/
-└── my_skill/
-    ├── skill.py
-    └── skill.md
+my_skill/
+├── skill.py
+└── skill.md
 
-Example implementation
-
-SKILL = {
-    "name": "my_skill",
-    "description": "An example Agent Code skill."
-}
-
-
-def greet(name: str = "world") -> str:
-    return f"Hello, {name}!"
-
-
-TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "greet",
-            "description": "Return a greeting.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"}
-                },
-                "required": []
-            }
-        }
-    }
-]
-
-TOOL_CALLABLES = {
-    "greet": greet
-}
-
-The native loader reads:
+Supported exports include:
 
 Export| Purpose
 "SKILL"| Skill metadata
@@ -276,590 +178,229 @@ Export| Purpose
 "COMMANDS"| Optional commands and aliases
 "HELP"| Optional help text
 
-Skills can be reloaded without restarting Agent Code. When an agent task is running, tool reloads are deferred until the task finishes.
-
-Bundled Skills
-
-Agent Code 2.0 includes:
-
-Skill| Description
-📁 "filesystem"| File operations within the workspace
-🌐 "public_api"| Search and use public APIs
-📧 "temp_mail"| Temporary inbox and supported email integrations
-
-Install bundled Skills:
+Install and list bundled Skills:
 
 agent-code skills install
-
-List bundled Skills:
-
 agent-code skills list
 
-Developer documentation: "Build a Skill" (docs/skills.html)
+Agent Code also supports instruction-only Claude-compatible "SKILL.md" files from supported locations. These are loaded as instructions rather than executed as Python modules.
 
----
+See "Claude-compatible Skills" (docs/claude-skills.md).
 
-🔌 2. Add-ons — Extend Agent Code Itself
+2. Add-ons — Extend the Application
 
-Skills extend the AI agent.
+Add-ons extend supported parts of the Agent Code application rather than only adding agent tools.
 
-Add-ons extend the application.
+Depending on the available extension points, they can provide:
 
-This is one of the central architectural differences in Agent Code 2.0.
-
-Add-ons are designed to let developers customize supported parts of the application, rather than being limited to adding AI tools.
-
-Add-on capabilities
-
-- Custom application UI.
-- Sidebar contributions.
-- Additional application actions.
-- Workspace extensions.
+- UI components.
+- Sidebar and toolbar contributions.
+- Application actions.
 - Settings extensions.
-- Toolbar contributions.
 - Agent tools and commands.
 - Lifecycle hooks.
-- Supported service replacements.
+- Service integrations.
 
-Example structure
+Example structure:
 
 my-addon/
 ├── addon.json
 └── addon.py
 
-Example manifest
+Security: Add-ons are executable Python code. They are not sandboxed and run with the permissions of the Agent Code process. Install only trusted Add-ons.
 
-{
-    "name": "my-addon",
-    "version": "1.0.0",
-    "description": "An example Agent Code extension",
-    "author": "Developer"
-}
+See "Add-on Development" (ADDON-DEVELOPMENT.md).
 
-Example Add-on
-
-```python
-def register(api):
-    api.register_web_component(
-        "workspace-card",
-        label="My Workspace",
-        location="addons",
-        html="<p>Workspace extension is active.</p>",
-    )
-
-    api.register_action(
-        "Sample action",
-        lambda: "Action completed"
-    )
-
-Supported UI locations
-
-Location| Purpose
-"sidebar"| Sidebar components
-"addons"| Add-ons page
-"settings"| Settings contributions
-"toolbar"| Toolbar components
-"workspace"| Workspace components
-
-Add-ons can also register named service implementations where the relevant Core integration exposes a service extension point.
-
-They use the supported Add-on API rather than unrestricted monkey-patching of application internals.
-
-Security: Add-ons are trusted Python code and execute with the user's operating-system permissions. They are not sandboxed.
-
-Developer documentation: "Add-on Development" (ADDON-DEVELOPMENT.md)
-
----
-
-🌐 3. MCP — Connect External Tools
+3. MCP — Connect External Tools
 
 Agent Code supports Model Context Protocol integration.
 
-MCP allows the AI agent to connect to external tool servers and use capabilities exposed by those servers.
-
-This provides another way to extend the agent without implementing every external integration as a native Skill.
+MCP allows the agent to connect to external tool servers and use the capabilities they expose.
 
 MCP is managed separately from native Skills and application Add-ons.
 
-Skills, Add-ons, and MCP are independent systems.
+Only connect trusted MCP servers and review the resources and operations they expose.
 
----
+Agent Modes and Permissions
 
-⚙️ Agent Modes and Permissions
+Agent Code separates task workflow from operation permissions.
 
-Agent Code separates the way an agent approaches a task from the permissions granted to its operations.
+Plan Mode
 
-📋 Plan Mode
+- Analyze an existing project.
+- Understand requirements.
+- Identify relevant files.
+- Prepare an implementation plan.
 
-Plan Mode focuses on understanding a task before implementation.
+Build Mode
 
-Useful for:
-
-- Analyzing an existing project.
-- Understanding requirements.
-- Identifying files that may need changes.
-- Preparing implementation steps.
-- Reviewing an approach before building.
-
-🛠️ Build Mode
-
-Build Mode focuses on implementing the requested work.
-
-The agent can use its available tools to:
-
-- Create files.
-- Modify source code.
+- Implement requested changes.
+- Create and modify files.
 - Execute supported commands.
 - Investigate errors.
-- Implement planned changes.
 - Review task results.
 
-⚡ Core Mode
+Core Mode
 
-Core Mode provides a lightweight agent configuration with a reduced tool surface.
+A lightweight configuration focused on essential capabilities and a reduced tool surface.
 
-It focuses on essential capabilities such as file creation, shell execution, and CURL operations.
+Permission modes
 
-Skills and Add-ons behavior follows the application's Core Mode policy.
+Agent Code provides configurable permission behavior, including:
 
-🔐 Permission behavior
+- Read-only operation.
+- Ask-before-operation behavior.
+- Automatic approval for operations covered by the configured policy.
 
-Agent Code provides configurable permission behavior.
+Permission settings do not bypass operating-system permissions or remote-host restrictions.
 
-Mode| Purpose
-🛡️ Safe| Restrict potentially sensitive operations
-⚙️ Normal| Balanced execution permissions
-⚡ Auto| Automatically allow operations covered by the configured policy
-👁️ Read-only| Restrict operations that modify files or execute commands
+Execution Environments
 
-Automatic permission does not override remote-host restrictions, operating-system permissions, or unavailable execution environments.
+Local Execution
 
----
+Supported operations can execute directly on the host machine when sandboxing is disabled.
 
-🖥️ Execution Environments
+Local execution is subject to the configured permission policy and operating-system permissions. It is not a strong security boundary.
 
-Agent Code separates tool capabilities from their execution environment.
-
-💻 Local Execution
-
-Run supported operations on the host computer.
-
-Useful for:
-
-- Local development tools.
-- Project files.
-- Installed software.
-- Local configuration.
-- Browser access.
-
-When the optional sandbox is disabled, shell commands execute on the host OS.
-
-📦 Alpine Linux Sandbox
+Podman Sandbox
 
 Agent Code supports an optional Podman-based Linux sandbox.
 
-The sandbox uses:
-
-Alpine Linux 3.22
-
-It provides:
-
-- Bash.
-- Core Linux utilities.
-- Git.
-- CURL.
-- Python and pip.
-- GCC and G++ through Alpine build packages.
-- Alpine package management.
-
-Install additional packages inside the container using:
-
-apk add --no-cache package-name
-
-The project workspace is mounted into the container at:
+The project workspace is mounted inside the container at:
 
 /workspace
 
-The sandbox uses a separate container environment, dropped capabilities, and "no-new-privileges".
+The Alpine Linux configuration provides common development tools and package management.
 
-However, the project workspace remains shared with the host. Containerization is not a guarantee against every form of malicious or destructive operation.
+Install additional Alpine packages with:
 
-🌐 SSH Remote Execution
+apk add --no-cache package-name
 
-Connect Agent Code to remote development machines.
+The sandbox applies restrictions such as dropped capabilities and "no-new-privileges".
 
-The SSH integration supports:
+The project workspace remains shared with the host, so changes made inside the container also affect host project files. Containerization is not a guarantee against every malicious or destructive operation.
 
-- Hostname or IP.
-- SSH username.
-- Custom port.
-- Private-key path.
-- SSH agent.
-- OpenSSH configuration.
-- Password authentication.
+See "Podman Container Selection" (docs/podman-container-selection.md).
 
-Remote commands are subject to the configured permission policy.
+SSH Remote Execution
 
-Unknown SSH host keys are not silently trusted. Verify the host fingerprint before accepting it.
+Connect to authorized remote development machines using supported SSH authentication methods.
 
-Install the optional SSH dependency if required:
+The integration supports SSH configuration, keys, agents, and password authentication.
 
-python -m pip install --only-binary=:all: paramiko
+Remote commands execute on the remote machine and are subject to its permissions.
 
-Only connect to machines you are authorized to administer.
+Verify unknown host fingerprints before accepting them.
 
----
+Project Context
 
-🌍 Browser Automation
+Agent Code uses project ignore rules when building its bounded project context.
+
+It reads:
+
+- ".gitignore"
+- ".agentignore"
+
+Example ".agentignore":
+
+node_modules/
+dist/
+build/
+coverage/
+*.min.js
+*.map
+
+Hard safety exclusions, including environment files and credential-related files, cannot be overridden by ignore negation patterns.
+
+Project Validation
+
+The validation helper can recognize common test entry points for Python, Rust, Go, and Node projects.
+
+It does not install project dependencies or configure build systems.
+
+Node package-manager scripts can execute arbitrary project commands and may require explicit approval.
+
+Browser Automation
 
 Agent Code includes browser automation capabilities through its browser integration.
 
-Browser tools can support workflows involving:
+Available operations depend on the installed browser and automation backend.
 
-- Opening websites.
-- Navigating pages.
-- Interacting with web interfaces.
-- Inspecting page content.
-- Browser diagnostics.
-
-A supported Chromium-based browser must be installed on the machine where browser automation runs.
-
-Firefox and Chromium browser detection is included in the diagnostic workflow, but browser compatibility depends on the automation backend and installed browser components.
-
-If automatic browser detection fails, check the browser executable configuration.
-
-Run:
+Run diagnostics if browser detection or setup fails:
 
 agent-code doctor
 
----
-
-🤖 AI Providers and Models
-
-Agent Code uses an OpenAI-compatible client architecture.
-
-You can configure supported providers through the application's API and model settings.
-
-Supported provider presets
-
-Provider| Endpoint
-OpenAI| "https://api.openai.com/v1"
-Google AI Studio| "https://generativelanguage.googleapis.com/v1beta/openai/"
-Anthropic| "https://api.anthropic.com/v1/"
-OpenRouter| Provider preset
-Custom| User-configured OpenAI-compatible endpoint
-
-Provider compatibility depends on supported API features, model identifiers, and request formats.
-
-The Anthropic compatibility endpoint uses the OpenAI SDK compatibility surface. Some native Claude API features may not be available through that interface.
-
-🔑 Bring Your Own Key
-
-Agent Code is designed around BYOK.
-
-You control:
-
-- Your AI provider.
-- Your API credentials.
-- Your selected model.
-- Your API usage.
-- Your provider spending.
-
-There is no mandatory recurring AI subscription built into the application.
-
-External providers may charge for their APIs or impose their own account requirements.
-
-🔒 Credential storage
-
-Provider credentials are stored through Python "keyring" in the operating system's credential store where supported.
-
-Examples include:
-
-- Windows Credential Manager.
-- macOS Keychain.
-- Linux Secret Service-compatible keyrings.
-
-The JSON configuration stores credential references rather than newly saved API-key values.
-
-If the operating-system credential store is unavailable, saving credentials fails rather than silently writing new secrets in plaintext.
-
----
-
-🎨 Desktop Experience
-
-Agent Code desktop launches with CustomTkinter. The WebUI is kept as a separate, authenticated server interface and is available with `agent-code server`; it does not launch as a local desktop window. The server serves the shared HTML/CSS/JavaScript frontend.
-
-See [`docs/ui-rebuild.md`](docs/ui-rebuild.md) for the WebUI page map, keyboard shortcuts, activity filtering, and workspace preview safety boundaries.
-
-The interface is organized around the development workspace.
-
-Workspace features
-
-- Chat-based interaction.
-- Project navigation.
-- Skills management.
-- Add-ons management.
-- MCP configuration.
-- API and model settings.
-- Help and documentation.
-- Task status, plans, history recovery, and checkpoint review.
-- Persistent project blueprint editor.
-- Workspace file browsing and text previews.
-- Provider profile management.
-
-Activity Details
-
-Agent Code separates the main conversation from internal task activity.
-
-Activity Details OFF
-
-The chat remains focused on user messages and assistant responses.
-
-During a task, the compact status is:
-
-"Working in project"
-
-Internal settings, model events, checkpoints, and detailed task events stay outside the main conversation.
-
-Activity Details ON
-
-The activity panel provides access to detailed task and tool events, including completion information and recovery details.
-
-Task stopping
-
-Agent Code supports cooperative stop controls and a three-click force-stop gesture.
-
-The force-stop behavior requests stronger cancellation of the agent's work and further AI/tool communication.
-
-It is not designed to close the browser application.
-
-Some blocking network calls or operations may only stop when their timeout or current operation returns.
-
-Recovery and review
-
-Task completion reports can include:
-
-- Changed files.
-- Text additions and deletions where safely measurable.
-- Binary file identification.
-- Diff review.
-- Recovery information.
-
-Review file changes and restore conflicts before applying recovery actions.
-
----
-
-📥 Installation
-
-Install from PyPI:
-
-```bash
-pip install agent-code
-```
-
-Launch Agent Code:
-
-```bash
-agent-code
-```
-
-For a terminal session or headless computer:
-
-```bash
-agent-code tui
-```
-
-Upgrade:
-
-```bash
-pip install --upgrade agent-code
-```
-
----
-
-🚀 Getting Started
-
-Launch the desktop application
-
-agent-code
-
-Explicitly launch the GUI
-
-agent-code gui
-
-Launch the terminal interface
-
-agent-code tui
-agent-code configure  # open the interactive settings center
-
-The TUI is useful for headless Linux environments and SSH sessions.
-
-On Linux, Agent Code can automatically select the TUI when no graphical display is available.
-
-Check your installation
+Getting Started
+
+1. Install Agent Code.
+2. Launch the desktop or terminal interface.
+3. Open Settings.
+4. Configure your AI provider and API key.
+5. Select a supported model.
+6. Choose your project directory.
+7. Send a test prompt.
+
+Diagnostics
+
+Check your environment:
 
 agent-code doctor
 
-Generate machine-readable diagnostics:
+Print machine-readable diagnostics:
 
 agent-code doctor --json
 
-Save a diagnostics report:
+Save a report:
 
 agent-code doctor --output report.json
 
-The diagnostics report does not include API keys.
+The diagnostics report is designed not to include API keys. Review reports before sharing them.
 
-Get command help
+Command Reference
 
-agent-code --help
+Command| Description
+"agent-code"| Launch the default interface
+"agent-code gui"| Launch the desktop GUI
+"agent-code tui"| Launch the Textual TUI
+"agent-code tui-legacy"| Launch the legacy curses interface
+"agent-code configure"| Open the interactive settings center
+"agent-code server"| Start the WebUI server
+"agent-code doctor"| Check the environment
+"agent-code doctor --json"| Print diagnostics as JSON
+"agent-code --help"| Display command help
 
----
+Example in-chat commands include:
 
-⚙️ First-Time Configuration
+- "/reset"
+- "/history"
+- "/skills"
+- "/save"
+- "/open <file>"
 
-1. Launch Agent Code.
-2. Open Settings.
-3. Navigate to the API and model settings.
-4. Select a provider.
-5. Enter your API key.
-6. Select a supported model.
-7. Save the configuration.
-8. Send a small test prompt.
+Available commands can depend on loaded Skills and Add-ons.
 
-Choose the project directory you want Agent Code to work in.
-
-Project workspace files and chat data are associated with the active project, while Skills and Add-ons use per-user locations.
-
----
-
-📁 Configuration and Data Locations
-
-Agent Code uses platform-specific directories for user configuration and extensions.
+Configuration and Data Locations
 
 Data| Linux / macOS| Windows
 Configuration| "~/.config/agent-code/"| "%APPDATA%\agent-code\"
 Skills| "~/.local/share/agent-code/skills/"| "%LOCALAPPDATA%\AgentCode\skills\"
 Add-ons| "~/.local/share/agent-code/addons/"| "%LOCALAPPDATA%\AgentCode\addons\"
-Project workspace| "./workspace/"| "./workspace/"
-Project chats| "./chats/"| "./chats/"
+Workspace| Project-local "workspace/"| Project-local "workspace/"
+Chats| Project-local "chats/"| Project-local "chats/"
 
-The Linux directories respect the corresponding XDG environment variables.
+Linux paths respect the relevant XDG environment variables.
 
-Legacy project-local Skills can be migrated into the global Skills directory. Existing global Skills are not overwritten during migration.
-
----
-
-🧰 Command Reference
-
-Application commands
-
-Command| Description
-"agent-code"| Launch the application
-"agent-code gui"| Explicitly launch the desktop GUI
-"agent-code tui"| Launch the Textual terminal workspace
-"agent-code configure"| Open the interactive Textual settings center
-"agent-code tui-legacy"| Launch the classic curses terminal interface
-"agent-code doctor"| Check the local environment
-"agent-code doctor --json"| Print diagnostic information as JSON
-"agent-code doctor --output report.json"| Save a diagnostic report
-"agent-code --help"| Display available commands
-
-Skills commands
-
-Command| Description
-"agent-code skills list"| List bundled Skills
-"agent-code skills install"| Install bundled Skills into the user/project environment
-
-In-chat commands
-
-The agent also supports built-in and extension-provided commands.
-
-Examples include:
-
-Command| Purpose
-"/reset"| Reset conversation memory
-"/history"| Display recent messages
-"/skills"| Inspect loaded Skills and commands
-"/save"| Save the conversation
-"/open <file>"| Open a workspace file
-
-Skills can register additional commands.
-
-Add-on commands are namespaced, for example:
-
-/sample-addon:status
-
----
-
-🔐 Security
-
-Agent Code is an AI development tool that can execute commands and load extensions. Its security depends on the selected execution environment and the code you choose to trust.
-
-Local shell
-
-When Podman sandboxing is disabled:
-
-- Commands execute on the host operating system.
-- Shell operators and known high-risk command patterns are restricted.
-- Workspace boundaries are enforced where detectable.
-- It is not a strong security boundary.
-
-Podman sandbox
-
-When enabled:
-
-- Shell and background commands run in Alpine Linux 3.22.
-- The project workspace is mounted into the container.
-- Container capabilities are dropped.
-- "no-new-privileges" is enabled.
-- Outbound networking depends on Podman and host network configuration.
-
-The sandbox runs as root inside the container, not as host root.
-
-The workspace remains shared with the host, so commands can still change or delete project files.
-
-Extension security
-
-Component| Security consideration
-Skills| Arbitrary Python code
-Add-ons| Trusted Python code with user permissions
-MCP| External tools may access exposed resources
-Local shell| Executes on the host when sandboxing is disabled
-SSH| Executes commands on the connected remote machine
-
-Security recommendations
-
-- Review Skills before installing them.
-- Only install Add-ons from trusted developers.
-- Connect only trusted MCP servers.
-- Protect API credentials.
-- Keep SSH private keys secure.
-- Review commands before granting automatic permissions.
-- Inspect file diffs before accepting changes.
-- Treat web pages and repository content as untrusted input.
-
----
-
-🛠️ Development
+Development
 
 Clone the repository:
 
-git clone https://github.com/agent-code-dev/agent-code.git
-
-cd agent-code
-
-Create a development environment:
-
-python -m venv .venv
-
-source .venv/bin/activate
+git clone https://github.com/Agent-code-dev/Agent-code.git
+cd Agent-code
 
 Install the project:
 
-python -m pip install --only-binary=:all: --upgrade pip
-
-python -m pip install --only-binary=:all: -e .
+python -m pip install -e .
+python -m pip install pytest
 
 Run tests:
 
@@ -867,139 +408,40 @@ python -m pytest -q
 
 Build distribution packages:
 
-python -m pip install --only-binary=:all: build
-
+python -m pip install build
 python -m build
 
-The project uses a "src/"-based Python package structure.
+The project uses a "src/"-based Python package layout.
 
----
+Documentation
 
-📚 Documentation
+- "Installation" (docs/installation.md)
+- "Server Mode" (docs/server-mode.md)
+- "Podman Container Selection" (docs/podman-container-selection.md)
+- "Claude-compatible Skills" (docs/claude-skills.md)
+- "Add-on Development" (ADDON-DEVELOPMENT.md)
+- "Server Documentation" (server/README.md)
+- "Agent Code 2.3.0 Release Notes" (RELEASE_NOTES_2.3.0.md)
 
-The repository includes offline-friendly HTML documentation.
+Security
 
-Documentation| Description
-📦 "Release from Codespaces" (docs/RELEASING-CODESPACES.md) | Build, test, tag, GitHub Release and PyPI publishing
-📖 "User Guide" (docs/index.html)| Installation, configuration, workflows, permissions, browser, SSH and troubleshooting
-🧩 "Skills Guide" (docs/skills.html)| Skill structure, tool schemas, commands and development
-🔌 "Add-on Guide" (docs/addons.html)| Application extension API, UI contributions, actions, hooks and services
-📋 "Release Notes" (RELEASE-NOTES-2.0.0.md)| Agent Code 2.0.0 changes
-🖥️ "Server Documentation" (server/README.md)| Separate Skills registry backend
+Agent Code can execute commands and load executable extensions. Use it with projects, tools, and integrations you trust.
 
----
+- Review commands before approving them.
+- Treat local execution as host-level access, not as a sandbox.
+- Remember that the Podman workspace is shared with the host.
+- Review Skills and Add-ons before installing them.
+- Connect only trusted MCP servers and remote machines.
+- Protect API keys and SSH credentials.
+- Inspect diffs before accepting changes.
+- Treat repository files, terminal output, and web content as untrusted input.
 
-🗂️ Project Structure
+License
 
-Agent-code/
-│
-├── src/
-│   └── agent_code/
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── agent.py
-│       ├── loader.py
-│       ├── addons.py
-│       ├── advanced_features.py
-│       ├── mcp_manager.py
-│       ├── paths.py
-│       ├── projects.py
-│       ├── skill_manager.py
-│       ├── doctor.py
-│       ├── cli.py
-│       ├── tui.py
-│       ├── textual_tui.py
-│       │
-│       └── data/
-│           ├── icons/
-│           └── skills/
-│
-├── docs/
-│   ├── index.html
-│   ├── skills.html
-│   └── addons.html
-│
-├── server/
-│   ├── skill-server.py
-│   ├── README.md
-│   └── LICENSE
-│
-├── tests/
-│
-├── ADDON-DEVELOPMENT.md
-├── RELEASE-NOTES-2.0.0.md
-├── README.md
-├── LICENSE
-├── MANIFEST.in
-└── pyproject.toml
-
----
-
-🗺️ Roadmap
-
-Areas of continued development:
-
-- 🚀 Improve agent reliability and task execution.
-- 🧠 Reduce unnecessary AI context and token consumption.
-- 🧩 Expand the Skills ecosystem.
-- 🔌 Expand supported Add-on extension points.
-- 🌐 Improve MCP integration.
-- 📦 Improve sandbox reliability.
-- 🖥️ Improve cross-platform compatibility.
-- 🔐 Strengthen extension security.
-- 🎨 Improve the desktop experience.
-- ⚙️ Improve provider compatibility and configuration.
-
----
-
-🤝 Contributing
-
-Contributions are welcome!
-
-You can help Agent Code by:
-
-- Reporting bugs.
-- Suggesting features.
-- Improving documentation.
-- Creating Skills.
-- Developing Add-ons.
-- Testing compatibility.
-- Reviewing architecture.
-- Submitting pull requests.
-
-For significant changes, open an issue before starting implementation so the proposed direction can be discussed.
-
-Repository: "agent-code-dev/agent-code" (https://github.com/agent-code-dev/agent-code)
-
----
-
-📜 License
-
-Agent Code uses separate licenses for its application and standalone server.
+Agent Code uses separate licenses for the application and standalone server.
 
 Component| License
 Agent Code application| MIT
-Standalone registry backend ("server/")| AGPL-3.0-only
+Standalone registry server ("server/")| AGPL-3.0-only
 
-The server's AGPL license does not replace the application's MIT license.
-
-See:
-
-- "Application LICENSE" (LICENSE)
-- "Server LICENSE" (server/LICENSE)
-
----
-
-<p align="center">
-  <img src="src/agent_code/data/icons/agent-code.png" width="65" alt="Agent Code">
-</p><h2 align="center">⚡ Agent Code 2.1</h2><p align="center">
-  <b>Your AI coding agent. Your tools. Your environment.</b>
-  <br><br>
-  <a href="https://github.com/agent-code-dev/agent-code">GitHub</a>
-  ·
-  <a href="https://pypi.org/project/agent-code/">PyPI</a>
-  ·
-  <a href="https://agent-code-dev.github.io">Website</a>
-</p><p align="center">
-  <sub>Built with Python · Designed for extensibility</sub>
-</p>
+See ""LICENSE"" (LICENSE) and ""server/LICENSE"" (server/LICENSE).
